@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -55,6 +55,19 @@ const PRESETS = [
   { glyph: "{ }", label: "Structured", teaches: "role + steps", text: "You are [your caster role]. Target [name the enemy]. Defeat it by [a precise, structured technique], then [a second concrete step]. Keep the spell [your constraint]." },
   { glyph: "/^/", label: "Regex", teaches: "concrete pattern", text: "You are [your caster role]. Bind [name the enemy] with this exact pattern: [write a concrete regex], and explain [what each part of it does]." },
   { glyph: "»»", label: "Fast", teaches: "terse + precise", text: "[one precise command verb] [name the enemy] using [a specific syntax technique]; [one tight constraint]." }
+];
+
+type TourStep = { selector: string; title: string; body: string; placement?: "top" | "bottom" | "left" | "right" | "center" };
+
+const TOUR_STEPS: TourStep[] = [
+  { selector: "", placement: "center", title: "Welcome, Prompt Mage", body: "In PromptCaster your prompts are your spells. There are no attack buttons — you write your way to victory. Here's the battlefield." },
+  { selector: ".composer-panel", placement: "left", title: "Compose your spell", body: "Write a prompt aimed at the Regex Goblin's weakness: precise, structured, syntax-focused. This is your weapon — craft it well." },
+  { selector: ".relics-panel", placement: "top", title: "Relics — live feedback", body: "These charge as your prompt gains a clear role, clarity terms, and names the enemy. Light all three for a stronger cast." },
+  { selector: ".cast-btn", placement: "top", title: "Cast the spell", body: "Fire your prompt with the button or ⌘/Ctrl + Enter. The Arbiter scores it, and damage scales directly with that score." },
+  { selector: ".arena-panel", placement: "right", title: "The arena", body: "Watch your spell strike here. After every cast the goblin retaliates — so a sharper prompt that ends the fight faster keeps you alive." },
+  { selector: ".stats", placement: "bottom", title: "Know the duel", body: "Your HP and tokens versus the goblin's HP. Tokens fuel each cast and scale with prompt length — concise spells cost less." },
+  { selector: ".verdict-panel", placement: "top", title: "The Arbiter's verdict", body: "After each cast the Arbiter critiques your craft and tells you exactly what to improve. Read it — it's how you get better." },
+  { selector: ".log-panel", placement: "top", title: "Combat log", body: "Every cast, hit, and verdict is recorded here. That's the loop: write, cast, read, refine. Good luck, mage." }
 ];
 
 const OPENING_LOGS: Omit<LogEntry, "id">[] = [
@@ -154,6 +167,22 @@ function App() {
   const [shake, setShake] = useState(false);
   const [borrowed, setBorrowed] = useState(false);
   const [judgeStatus, setJudgeStatus] = useState<JudgeStatus | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // Auto-start the tour on first visit; remember dismissal.
+  useEffect(() => {
+    let done = false;
+    try { done = localStorage.getItem("pc_tour_done") === "1"; } catch { /* ignore */ }
+    if (!done) {
+      const t = window.setTimeout(() => setTourOpen(true), 450);
+      return () => window.clearTimeout(t);
+    }
+  }, []);
+
+  function closeTour() {
+    setTourOpen(false);
+    try { localStorage.setItem("pc_tour_done", "1"); } catch { /* ignore */ }
+  }
 
   const cacheRef = useRef(new Map<string, JudgeResult>());
   const patternHistoryRef = useRef<Set<string>[]>([]);
@@ -348,6 +377,7 @@ function App() {
   // keyboard: ⌘/Ctrl + Enter casts
   useEffect(() => {
     function handler(e: KeyboardEvent) {
+      if (tourOpen) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         if (canCast) void cast();
@@ -370,6 +400,7 @@ function App() {
             <span className="led" />{judgeStatus?.mode === "fallback" ? "local judge" : "llm judge"}
           </span>
           <span className="pill muted"><span className="pill-k">turn</span><span className="pill-v">{formatTurn(turn)}</span></span>
+          <button className="pill pill-btn" onClick={() => setTourOpen(true)} title="Replay the tutorial">? tour</button>
         </div>
       </header>
 
@@ -420,6 +451,8 @@ function App() {
           </div>
         </div>
       )}
+
+      <OnboardingTour steps={TOUR_STEPS} open={tourOpen} onClose={closeTour} />
     </main>
   );
 }
@@ -684,6 +717,111 @@ function VerdictPanel({ judge }: { judge: JudgeResult | null }) {
         )}
       </div>
     </section>
+  );
+}
+
+// ---------- onboarding tour ----------
+function OnboardingTour({ steps, open, onClose }: { steps: TourStep[]; open: boolean; onClose: () => void }) {
+  const [index, setIndex] = useState(0);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => { if (open) setIndex(0); }, [open]);
+
+  // Track the target element's position; recompute on step change / resize.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const step = steps[index];
+    let raf = 0;
+    const update = () => {
+      const el = step.selector ? (document.querySelector(step.selector) as HTMLElement | null) : null;
+      setRect(el ? el.getBoundingClientRect() : null);
+    };
+    update();
+    raf = requestAnimationFrame(update);
+    window.addEventListener("resize", update);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", update); };
+  }, [open, index, steps]);
+
+  const last = index === steps.length - 1;
+  const next = () => (last ? onClose() : setIndex((i) => Math.min(steps.length - 1, i + 1)));
+  const back = () => setIndex((i) => Math.max(0, i - 1));
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      else if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); next(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); back(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, index, last]);
+
+  if (!open) return null;
+  const step = steps[index];
+
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const PAD = 8, GAP = 16, CARD_W = 320;
+
+  // spotlight box (expanded around the target)
+  const sb = rect ? { top: rect.top - PAD, left: rect.left - PAD, w: rect.width + PAD * 2, h: rect.height + PAD * 2 } : null;
+
+  // resolve placement (auto-pick the side with the most room)
+  let placement = step.placement ?? "bottom";
+  if (sb && placement !== "center") {
+    const ok = { bottom: vh - (sb.top + sb.h), top: sb.top, right: vw - (sb.left + sb.w), left: sb.left };
+    if (ok[placement] < 200) placement = (Object.entries(ok).sort((a, b) => b[1] - a[1])[0][0] as typeof placement);
+  }
+
+  // card + arrow geometry
+  const cardStyle: React.CSSProperties = {};
+  let arrowDir: "up" | "down" | "left" | "right" = "up";
+  const arrowStyle: React.CSSProperties = {};
+
+  if (!sb || placement === "center") {
+    cardStyle.top = "50%"; cardStyle.left = "50%"; cardStyle.transform = "translate(-50%, -50%)";
+  } else {
+    const cx = sb.left + sb.w / 2, cy = sb.top + sb.h / 2;
+    const clampX = (x: number) => Math.max(16, Math.min(vw - CARD_W - 16, x));
+    if (placement === "bottom") {
+      cardStyle.top = sb.top + sb.h + GAP; cardStyle.left = clampX(cx - CARD_W / 2);
+      arrowDir = "up"; arrowStyle.top = -9; arrowStyle.left = Math.min(CARD_W - 28, Math.max(16, cx - clampX(cx - CARD_W / 2) - 6));
+    } else if (placement === "top") {
+      cardStyle.top = sb.top - GAP; cardStyle.left = clampX(cx - CARD_W / 2); cardStyle.transform = "translateY(-100%)";
+      arrowDir = "down"; arrowStyle.bottom = -9; arrowStyle.left = Math.min(CARD_W - 28, Math.max(16, cx - clampX(cx - CARD_W / 2) - 6));
+    } else if (placement === "right") {
+      cardStyle.left = sb.left + sb.w + GAP; cardStyle.top = Math.max(16, Math.min(vh - 160, cy - 70));
+      arrowDir = "left"; arrowStyle.left = -9; arrowStyle.top = Math.max(14, cy - (cardStyle.top as number) - 6);
+    } else { // left
+      cardStyle.left = sb.left - GAP; cardStyle.top = Math.max(16, Math.min(vh - 160, cy - 70)); cardStyle.transform = "translateX(-100%)";
+      arrowDir = "right"; arrowStyle.right = -9; arrowStyle.top = Math.max(14, cy - (cardStyle.top as number) - 6);
+    }
+  }
+
+  return (
+    <div className="tour-root">
+      <div className={`tour-blocker ${sb ? "" : "dim"}`} />
+      {sb && (
+        <div
+          className="tour-spotlight"
+          style={{ top: sb.top, left: sb.left, width: sb.w, height: sb.h }}
+        />
+      )}
+      <div className="tour-card" style={cardStyle} key={index}>
+        {sb && placement !== "center" && <span className={`tour-arrow ${arrowDir}`} style={arrowStyle} />}
+        <div className="tour-card-head">
+          <span className="tour-step-no">{String(index + 1).padStart(2, "0")} / {String(steps.length).padStart(2, "0")}</span>
+          <button className="tour-skip" onClick={onClose}>skip tutorial ✕</button>
+        </div>
+        <h3 className="tour-title">{step.title}</h3>
+        <p className="tour-body">{step.body}</p>
+        <div className="tour-progress"><span style={{ width: `${((index + 1) / steps.length) * 100}%` }} /></div>
+        <div className="tour-actions">
+          <button className="tour-btn ghost" onClick={back} disabled={index === 0}>back</button>
+          <button className="tour-btn primary" onClick={next}>{last ? "finish ▸" : "next ▸"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

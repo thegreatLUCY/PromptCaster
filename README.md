@@ -91,6 +91,14 @@ The whole point is *writing* good prompts, so several systems make shortcuts wor
 
 ---
 
+## Onboarding tour
+
+First-time players get a guided, cinematic walkthrough that spotlights each part of the UI in turn — a dark overlay dims the screen, the current element gets a glowing highlight, and a floating card (with an animated arrow pointing at it) explains the feature. Navigate with **Back / Next / Skip**, the arrow keys, or `Esc`; the rest of the UI is locked while it runs. It auto-starts once and can be replayed anytime via the **`? tour`** button in the top bar.
+
+![Onboarding tour](docs/screenshots/tour.png)
+
+---
+
 ## Tech stack
 
 - **Frontend:** React 19 + TypeScript, single-page app, hand-rolled CSS design system (JetBrains Mono, `oklch` accents), SVG sprites.
