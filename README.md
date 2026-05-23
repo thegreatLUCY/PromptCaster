@@ -116,7 +116,7 @@ First-time players get a guided, cinematic walkthrough that spotlights each part
 ## Tech stack
 
 - **Frontend:** React 19 + TypeScript, single-page app, hand-rolled CSS design system (JetBrains Mono, `oklch` accents), SVG sprites.
-- **Backend:** Express server (`server.ts`) exposing `/api/judge-status` and `/api/judge-prompt`, calling an OpenAI-compatible chat API with a strict JSON contract + local fallback.
+- **Backend:** Express server for local dev plus Vercel serverless API routes (`api/judge-status.ts`, `api/judge-prompt.ts`), calling an OpenAI-compatible chat API with a strict JSON contract + local fallback.
 - **Build/dev:** Vite.
 
 ---
@@ -170,7 +170,10 @@ That starts directly on Null Oracle with full HP/tokens and logs a test override
 src/
   main.tsx     # all game state, combat loop, UI components, sprites
   styles.css   # design tokens, layout, arena VFX, animations
-server.ts      # Express server: judge endpoints, LLM call, fallback, cache
+api/
+  judge-status.ts   # Vercel serverless status endpoint
+  judge-prompt.ts   # Vercel serverless judge endpoint
+server.ts      # local Express server: judge endpoints, LLM call, fallback, cache
 index.html     # entry (loads JetBrains Mono)
 docs/screenshots/   # README imagery
 ```

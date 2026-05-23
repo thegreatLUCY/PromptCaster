@@ -13,7 +13,8 @@ Live demo: https://prompt-caster.vercel.app
 
 - **Frontend:** React 19 + TypeScript, single-page, hand-rolled CSS design system (no UI
   libs). JetBrains Mono everywhere (loaded in `index.html`).
-- **Backend:** Express (`server.ts`) — judge endpoints + LLM call + local fallback + cache.
+- **Backend:** Express (`server.ts`) for local dev plus Vercel serverless routes (`api/`) —
+  judge endpoints + LLM call + local fallback + cache.
 - **Build/dev:** Vite.
 - **Hosted demo:** `https://prompt-caster.vercel.app`
 
@@ -37,7 +38,8 @@ npm run preview   # tsx server.ts --prod  (serves dist/)
 |------|------|
 | `src/main.tsx` | Everything client-side: game state, combat loop, all components, sprites, the onboarding tour, the judge normalizer + local fallback. |
 | `src/styles.css` | Full design system: tokens, layout, arena VFX, animations, the desktop fit-to-viewport rules, tour styles. |
-| `server.ts` | `/api/judge-status`, `/api/judge-prompt`, the Arbiter system prompt, the LLM call, server-side normalize + local fallback, cache. |
+| `server.ts` | Local Express server for `/api/judge-status`, `/api/judge-prompt`, the Arbiter system prompt, the LLM call, server-side normalize + local fallback, cache. |
+| `api/judge-status.ts` / `api/judge-prompt.ts` | Vercel serverless versions of the same judge endpoints; required for the hosted demo. |
 | `index.html` | Entry; loads JetBrains Mono. |
 | `.env` (git-ignored) / `.env.example` | `AI_API_KEY`, optional compatibility `VITE_AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`. Key is **server-only**. |
 | `docs/screenshots/` | README imagery. |
@@ -246,6 +248,9 @@ Dependency-free guided walkthrough (`OnboardingTour` + `TOUR_STEPS` in `src/main
   inventory/maps/accounts/multiplayer.
 - API key **server-only**; never send combat history to the LLM; keep compact JSON-only
   output; keep the local fallback and the cache.
+- Hosted Vercel deploys must keep `AI_API_KEY`, `AI_BASE_URL`, and `AI_MODEL` configured in
+  the Vercel dashboard. If the top-bar judge pill falls back/offline on Vercel while local
+  works, check those env vars and the serverless `api/` deployment first.
 - Keep all four anti-abuse systems (skeletons, borrowed=0, resistance, tokens).
 - Keep the serious CLI/IDE mood; 1px borders, square corners, the three accents.
 
