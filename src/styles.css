@@ -473,18 +473,32 @@ textarea { font: inherit; color: inherit; }
   /* composer: spell-area flexes to fill; the textarea shrinks to its box
      (min-height:0) and scrolls internally, so it can never overlap the footer.
      The floor keeps a usable textarea while leaving room for the CAST button. */
-  .composer-body { min-height: 0; gap: 9px; padding: 14px; }
+  .composer-body { min-height: 0; gap: 0; padding: 14px; }
   .composer-panel { overflow: hidden; }
   .spell-area { flex: 1; min-height: 112px; }
   .spell-input textarea { min-height: 0; resize: none; }
-  .templates-head { margin-bottom: 6px; }
+  .templates-head { margin-top: 5px; margin-bottom: 0; }
+  .templates { gap: 0; }
+  .template { padding: 5px 8px; }
+  .template + .template { border-left: 0; }
+  .template .glyph { width: 32px; height: 24px; white-space: nowrap; }
+  .template .label { font-size: 12.5px; }
+  .template .teaches { margin-top: 0; font-size: 9.5px; line-height: 1.25; }
+  .cast-row { gap: 0; margin-top: 4px; align-items: center; }
+  .cast-explain { font-size: 10px; line-height: 1.25; }
+  .cast-btn { min-width: 172px; padding: 7px 14px; }
+  .cast-btn .label { font-size: 13px; }
+  .cast-btn .cost { font-size: 10px; padding-left: 10px; }
 
-  /* bottom row: verdict | relics | log — all visible, each capped + internal scroll */
+  /* bottom row: verdict | relics | log — all visible, compact where needed */
   .bottom { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.3fr); flex-shrink: 0; }
   .bottom .panel { min-height: 0; }
   .verdict-body { max-height: 128px; overflow: auto; padding: 11px 14px; gap: 6px; }
-  .relic-list { max-height: 128px; overflow: auto; }
-  .relic-row { padding: 7px 14px; }
+  .relic-list { flex: 1; min-height: 0; max-height: none; overflow: visible; }
+  .relic-row { flex: 1; min-height: 0; padding: 4px 12px; gap: 9px; }
+  .relic-text { gap: 0; }
+  .relic-name { font-size: 11.5px; line-height: 1.2; }
+  .relic-rule { font-size: 9.5px; line-height: 1.25; }
   .log { max-height: 128px; }
 }
 
