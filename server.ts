@@ -23,11 +23,17 @@ type JudgeResult = {
   source?: "ai" | "fallback" | "cache";
 };
 
+const serverDamageFromScore = (score: number) => Math.max(3, Math.round((score / 100) * 45));
+
 const SYSTEM_PROMPT = [
-  "You are THE ARBITER: a ruthless master prompt-engineer judging spells in a dark roguelike where prompts are magic.",
-  "Score how well the player's prompt would actually steer an LLM to defeat the enemy. Weight: a clear system role, specificity, explicit structure/constraints, naming the target, and exploiting the stated weakness. Penalize vagueness, filler, hedging, and generic verbs.",
-  "Be incisive and critical, never flattering. In `reason`, deliver one terse expert verdict that names the single most decisive technique the prompt used well OR the specific craft flaw that weakened it (e.g. 'anchored regex with escaped literals — surgical' or \"vague verb 'strike' with no pattern or constraint\"). Quote the player's own wording when it sharpens the critique.",
-  "In `terminalText`, narrate the spell's impact cinematically and seriously — dark fantasy meets parser/compiler imagery. No emojis, no exclamation spam.",
+  "You are THE ARBITER: a combat coach and master prompt-engineer judging spells in a dark roguelike where prompts are magic.",
+  "Judge usable human intent first, advanced promptcraft second. A player may write as a warrior, mage, commander, rogue, analyst, or prompt coach. Do not require formal prompt-engineering language if the prompt clearly gives a role, target, action, and intended effect.",
+  "Score in two layers. Layer 1 Combat Intent: role/persona, target, action, intended effect, and specific tactic. Layer 2 Promptcraft Reliability: constraints, sequence, enemy adaptation, examples/context, and confirmation/checking.",
+  "Regex Goblin represents ambiguity, malformed instructions, missing edge cases, and unclear success criteria. Literal regex/code syntax can help only when it supports the action; never require it, never over-reward symbols, anchors, JSON, or compiler jargon by themselves.",
+  "Recognition rules: combat actions like throw, strike, stab, cast, bind, interrupt, expose, disable, and weaken count as actions. Effects like lose health, damage, stop next attack, interrupt spell, break ward, or disable count as intended effects. Body parts, weak points, number of strikes, and named tactics count as specificity. 'check', 'confirm', 'verify', 'ensure', and 'report whether it worked' count as confirmation.",
+  "Be constructive, not just critical. In `reason`, always name what worked before naming the flaw when there is any usable intent. In `improvement`, give a concrete upgrade phrase the player could add next cast.",
+  "Do not give a critical score if `terminalText` says the strike failed, fizzled, or remains unformed. Critical and solid results must narrate a real hit; weak and misfire results may fail.",
+  "In `terminalText`, narrate the spell's impact cinematically and seriously — dark fantasy with terminal/parser atmosphere. No emojis, no exclamation spam.",
   "Return JSON only."
 ].join(" ");
 
@@ -128,8 +134,8 @@ async function judgeWithAi(payload: JudgeRequest): Promise<JudgeResult> {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.45,
-      max_tokens: 260,
+      temperature: 0.3,
+      max_tokens: 180,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -141,32 +147,41 @@ async function judgeWithAi(payload: JudgeRequest): Promise<JudgeResult> {
             limits: {
               score: "integer 0-100",
               damage: "integer 0-45",
-              reason: "ONE sharp expert critique sentence naming the single most decisive technique or flaw, under 140 chars",
-              terminalText: "ONE cinematic dark-fantasy sentence, under 120 chars",
-              improvement: "ONE concrete, actionable fix the player could make to score higher; name the missing/weak element specifically (e.g. 'Add an explicit role: open with You are...' or 'Replace the vague verb with a concrete regex'), under 120 chars. Even for a critical spell, name the next refinement."
+              reason: "ONE constructive combat-coach sentence naming what worked and the main missing upgrade, under 115 chars",
+              terminalText: "ONE cinematic dark-fantasy sentence, under 105 chars",
+              improvement: "ONE concrete, actionable upgrade phrase the player can add next cast, under 100 chars. For a critical spell, make it a refinement, not a flaw."
             },
             enemy: payload.enemy,
             weakness: payload.weakness,
             relics: payload.relics,
             playerPrompt: payload.playerPrompt,
-            outputExamples: [
-              {
-                score: 88,
-                quality: "critical",
-                damage: 39,
-                reason: "Opens with a system role, then anchors an escaped regex to the goblin's exact weakness — no wasted tokens.",
-                terminalText: "The pattern locks shut like a closing bracket; the goblin's syntax unravels into validated ash.",
-                improvement: "Tighten further: state the expected output format so the bind can't be reinterpreted."
-              },
-              {
-                score: 22,
-                quality: "misfire",
-                damage: 6,
-                reason: "Generic 'attack the goblin' with no role, no pattern, no constraint — nothing for the parser to bind.",
-                terminalText: "The incantation dissolves into unparsed noise and dies before the goblin's ward.",
-                improvement: "Open with an explicit role ('You are...'), name the Regex Goblin, and give one concrete escaped pattern."
-              }
-            ]
+            scoringRubric: {
+              role: "Does the player give a persona or useful perspective?",
+              target: "Is the enemy or problem clearly targeted?",
+              action: "Is there a clear combat or analytical action?",
+              effect: "Is the intended result clear, such as damage, interrupt, disable, clarify, or weaken?",
+              specificity: "Is the tactic vivid or specific enough to guide the action?",
+              constraints: "Does it include must/avoid/only/without/requirements or risk control?",
+              sequence: "Does it give steps, priority, or order of operations?",
+              confirmation: "Does it ask to confirm, check, verify, ensure, or report whether it worked?",
+              enemyAdaptation: "Does it adapt to Regex Goblin's ambiguity, patterns, ward, next spell, or weak point?"
+            },
+            hardCaps: {
+              noTargetOrAction: "Maximum 35 if there is no clear target or no clear action.",
+              noIntendedEffect: "Maximum 55 if the player does not say what should happen to the enemy/problem.",
+              actionOnly: "Maximum 55 for target+action prompts with no tactic, effect, or specificity.",
+              noSpecificity: "Maximum 72 if the action is broad and has no tactic, weak point, number, method, or concrete detail.",
+              noConstraintAndNoConfirmation: "Maximum 76 if it has combat intent but no constraint and no confirmation.",
+              noAdaptation: "Maximum 88 if it never adapts to the enemy's weakness, ward, next attack, ambiguity, or weak point.",
+              codeOnly: "Maximum 68 for prompts that rely mainly on regex/code symbols without plain-language combat intent and confirmation."
+            },
+            scoreBands: {
+              critical: "82-100: role/target/action/effect plus tactic, adaptation, constraint or confirmation.",
+              solid: "55-84: usable human combat intent with a clear target, action, effect, and at least one tactical detail.",
+              weak: "25-54: partial intent, usually target+action, but too vague or missing effect/tactic.",
+              misfire: "0-24: no clear target, no clear action, incoherent, or pure vibes."
+            },
+            writingRule: "Do not copy these instructions. Write a fresh reason and improvement based only on the actual playerPrompt."
           })
         }
       ]
@@ -178,7 +193,7 @@ async function judgeWithAi(payload: JudgeRequest): Promise<JudgeResult> {
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI returned no content.");
 
-  return normalizeJudgeResult(JSON.parse(content), "ai");
+  return applyPromptcraftBounds(normalizeJudgeResult(JSON.parse(content), "ai"), payload);
 }
 
 function normalizeJudgeResult(raw: Partial<JudgeResult>, source: "ai" | "fallback"): JudgeResult {
@@ -192,82 +207,274 @@ function normalizeJudgeResult(raw: Partial<JudgeResult>, source: "ai" | "fallbac
     damage: clampNumber(raw.damage, 0, 45, defaultDamage),
     reason: clampText(raw.reason, "The Arbiter finds nothing decisive in this casting.", 180),
     terminalText: clampText(raw.terminalText, "The spell resolves into flat terminal static.", 140),
-    improvement: clampText(raw.improvement, "Add an explicit role, name the target, and give one concrete pattern.", 140),
+    improvement: clampText(raw.improvement, "Add a specific tactic, intended effect, and a way to confirm the hit worked.", 140),
     source
   };
 }
 
+function analyzePromptcraft(playerPrompt: string, enemy: string) {
+  const prompt = playerPrompt.toLowerCase();
+  const length = playerPrompt.length;
+  const role = /^\s*(you are|act as|as a)\b/i.test(playerPrompt);
+  const clarity = /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/.test(prompt);
+  const target = prompt.includes(enemy.toLowerCase()) || /\b(goblin|enemy|target|foe)\b/.test(prompt);
+  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry)\b/.test(prompt);
+  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell)\b/.test(prompt);
+  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic)\b/.test(prompt) || /\d/.test(prompt);
+  const goal = /\b(goal|goals|outcome|objective|solve|defeat|clarify|diagnose|rewrite|explain|identify|make|force|turn)\b/.test(prompt) || effect;
+  const constraints = /\b(must|avoid|only|never|do not|require|requires|required|requirement|requirements|constraint|constraints|criteria|criterion|include|exclude|limit|without)\b/.test(prompt);
+  const structure = /\b(step|steps|first|then|finally|list|lists|listing|outline|sequence|plan|section|name|naming|give|giving|show|showing|finish|finishing)\b/.test(prompt);
+  const context = /\b(context|assumption|assumptions|edge case|edge cases|ambiguity|ambiguous|missing|audience|purpose)\b/.test(prompt);
+  const example = /\b(example|for example|sample|illustrate)\b/.test(prompt);
+  const confirmation = /\b(confirm|confirms|confirmation|check|checks|checking|verify|verifies|verification|validate|validation|review|ensure|report|success criteria|worked|lands|landed|final)\b/.test(prompt);
+  const adaptation = /\b(regex goblin|ambiguity|ambiguous|pattern|parser|malformed|loophole|ward|casting hand|next spell|next attack|weak point|escape|unexpected token|parentheses|slash)\b/.test(prompt);
+  const technical = /\b(regex|syntax|pattern|escape|literal|json|schema)\b/.test(prompt) || /[{}[\]()/\\^$*+?.|]/.test(playerPrompt);
+  const vagueCount = (prompt.match(/\b(maybe|stuff|things|somehow|good|better|destroy)\b/g) ?? []).length;
+  const combatIntent = [role, target, action, effect, specificity].filter(Boolean).length;
+  const reliability = [constraints, structure, context, example, confirmation, adaptation].filter(Boolean).length;
+  const categories = [role, clarity, target, action, effect, specificity, constraints, structure, context, example, confirmation, adaptation].filter(Boolean).length;
+  return {
+    role,
+    clarity,
+    target,
+    action,
+    effect,
+    specificity,
+    goal,
+    constraints,
+    structure,
+    context,
+    example,
+    confirmation,
+    adaptation,
+    technical,
+    vagueCount,
+    combatIntent,
+    reliability,
+    categories,
+    veryShort: length < 45,
+    goodLength: length >= 60 && length <= 360
+  };
+}
+
+function applyPromptcraftBounds(result: JudgeResult, payload: JudgeRequest): JudgeResult {
+  const features = analyzePromptcraft(payload.playerPrompt, payload.enemy);
+  const caps: number[] = [];
+
+  if (!features.target || !features.action) caps.push(35);
+  if (!features.effect) caps.push(55);
+  if (features.target && features.action && !features.effect && !features.specificity) caps.push(55);
+  if (!features.specificity) caps.push(72);
+  if (!features.constraints && !features.confirmation) caps.push(76);
+  if (!features.adaptation) caps.push(88);
+  if (!features.role && features.combatIntent < 4) caps.push(78);
+  if (features.veryShort) caps.push(35);
+  if (features.vagueCount >= 2 && features.combatIntent < 4) caps.push(35);
+  if (features.technical && !features.effect) caps.push(35);
+  if (features.technical && (features.combatIntent < 4 || !features.confirmation)) caps.push(68);
+
+  const capMax = caps.length ? Math.min(...caps) : 100;
+  const cappedScore = Math.min(result.score, capMax);
+  const score =
+    features.combatIntent >= 4 && features.reliability >= 2 && features.goodLength && features.vagueCount === 0
+      ? Math.max(cappedScore, Math.min(82, capMax))
+      : features.combatIntent >= 5 && features.reliability >= 1 && features.goodLength && features.vagueCount === 0
+        ? Math.max(cappedScore, Math.min(58, capMax))
+        : cappedScore;
+  const quality = normalizeQuality(undefined, score);
+  const aligned = alignJudgeNarrative({ ...result, score, quality }, payload);
+  const improvement =
+    result.source === "fallback" && quality !== "critical"
+      ? chooseMissingFeatureImprovement(features)
+      : aligned.improvement;
+
+  return {
+    ...aligned,
+    score,
+    quality,
+    damage: serverDamageFromScore(score),
+    improvement
+  };
+}
+
+function chooseMissingFeatureImprovement(features: ReturnType<typeof analyzePromptcraft>) {
+  if (!features.role) return "Fix this next: add a role or combat perspective.";
+  if (!features.target) return "Fix this next: name the enemy or target.";
+  if (!features.action) return "Fix this next: add a clear action.";
+  if (!features.effect) return "Fix this next: say what should happen to the enemy.";
+  if (!features.specificity) return "Fix this next: add a tactic, weak point, or concrete detail.";
+  if (!features.constraints && !features.confirmation) return "Fix this next: add a confirmation check or must/avoid constraint.";
+  if (!features.confirmation) return "Fix this next: add a confirmation or success check.";
+  if (!features.constraints) return "Fix this next: add a must/avoid/only constraint.";
+  if (!features.adaptation) return "Fix this next: connect the move to the goblin's weakness or next attack.";
+  return "Refine further: name the exact weakness or risk the strike exploits.";
+}
+
+function alignJudgeNarrative(result: JudgeResult, payload: JudgeRequest): JudgeResult {
+  const terminal = result.terminalText.toLowerCase();
+  const contradictoryHit =
+    (result.quality === "solid" || result.quality === "critical") &&
+    /\b(fail\w*|fizzl\w*|dodg\w*|evad\w*|slip\w*|weakly|dissipat\w*|sputter\w*|untouched|unharmed|unscathed|unbound|miss\w*|unformed|no spell)\b/.test(terminal);
+  const reasonLooksLikeCriticalFlaw =
+    result.quality === "critical" &&
+    /\b(lacks|lacking|lacked|fails|failed|missing)\b/i.test(result.reason);
+  const hasExplicitCount = /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/i.test(payload.playerPrompt);
+  const redundantNumberTip = hasExplicitCount && /\b(number|exact number)\b/i.test(result.improvement);
+  const redundantNumberReason = hasExplicitCount && /\b(number|exact number|number of)\b/i.test(result.reason);
+
+  return {
+    ...result,
+    reason: reasonLooksLikeCriticalFlaw || redundantNumberReason
+      ? "Strong craft: role, target, action, and effect are clear; refine with sharper enemy-specific detail."
+      : result.reason,
+    terminalText: contradictoryHit
+      ? result.quality === "critical"
+        ? "The spell lands cleanly; green sigils bite into the Regex Goblin and its ward fractures."
+        : "The spell lands with force, cutting through the goblin's ward and drawing a clean wound."
+      : result.terminalText,
+    improvement: redundantNumberTip
+      ? "Refine further: name the exact weakness or risk the strike exploits."
+      : result.improvement
+  };
+}
+
 function fallbackJudge(payload: JudgeRequest): JudgeResult {
-  const prompt = payload.playerPrompt.toLowerCase();
-  let score = 18;
+  const features = analyzePromptcraft(payload.playerPrompt, payload.enemy);
+  let score = 8;
   const hits: string[] = [];
   const misses: string[] = [];
 
-  if (payload.playerPrompt.trim().startsWith("You are")) {
-    score += 18;
-    hits.push("a system role grounds the cast");
+  if (features.role) {
+    score += 12;
+    hits.push("the role gives the spell a voice");
   } else {
-    misses.push("no system role to anchor the spell");
+    misses.push("add a role or combat perspective");
   }
-  if (/\b(precise|concise|specific|structured)\b/.test(prompt)) {
-    score += 18;
-    hits.push("clarity terms sharpen the intent");
+  if (features.clarity) {
+    score += 5;
+    hits.push("clear wording sharpens the task");
   } else {
-    misses.push("no clarity directive (precise/structured)");
+    misses.push("make the wording more specific");
   }
-  if (prompt.includes(payload.enemy.toLowerCase())) {
-    score += 16;
-    hits.push("the target is named outright");
+  if (features.target) {
+    score += 12;
+    hits.push("the target is clear");
   } else {
-    misses.push("the target is never named");
+    misses.push("name the enemy or target");
   }
-  if (/\b(regex|syntax|pattern|escape|literal|token|constraint|step|json)\b/.test(prompt)) {
-    score += 18;
-    hits.push("syntax-focused wording exploits the weakness");
+  if (features.action) {
+    score += 12;
+    hits.push("the action is usable");
   } else {
-    misses.push("nothing targets its syntax weakness");
+    misses.push("add a clear action");
   }
-  if (payload.playerPrompt.length > 70 && payload.playerPrompt.length < 360) {
+  if (features.goal) {
+    score += 5;
+    hits.push("the goal points the cast");
+  } else {
+    misses.push("state the intended outcome");
+  }
+  if (features.effect) {
     score += 10;
-    hits.push("tight, usable spell length");
-  }
-  if (/[{}[\]()/\\^$*+?.|]/.test(payload.playerPrompt)) {
-    score += 10;
-    hits.push("concrete regex sigils give it teeth");
+    hits.push("the desired effect is clear");
   } else {
-    misses.push("no concrete pattern for the parser to bind");
+    misses.push("say what should happen to the enemy");
+  }
+  if (features.specificity) {
+    score += 8;
+    hits.push("specific detail guides the strike");
+  } else {
+    misses.push("add a tactic, weak point, or concrete detail");
+  }
+  if (features.constraints) {
+    score += 10;
+    hits.push("constraints control the risk");
+  } else {
+    misses.push("add a must/avoid/only constraint");
+  }
+  if (features.structure) {
+    score += 8;
+    hits.push("structure gives the action order");
+  } else {
+    misses.push("add sequence or priority");
+  }
+  if (features.context) {
+    score += 6;
+    hits.push("context addresses the confusion");
+  } else {
+    misses.push("add context or edge-case handling");
+  }
+  if (features.example) {
+    score += 8;
+    hits.push("an example makes the instruction testable");
+  }
+  if (features.confirmation) {
+    score += 10;
+    hits.push("the result can be confirmed");
+  } else {
+    misses.push("add a confirmation or success check");
+  }
+  if (features.adaptation) {
+    score += 10;
+    hits.push("the attack adapts to the goblin");
+  } else {
+    misses.push("connect the move to the goblin's weakness or next attack");
+  }
+  const length = payload.playerPrompt.length;
+  if (length >= 60 && length <= 360) {
+    score += 8;
+    hits.push("focused, usable length");
+  } else if (length >= 30 && length <= 520) {
+    score += 4;
+  } else if (length < 25) {
+    score -= 8;
+    misses.push("too short to steer an AI");
+  } else {
+    score -= 8;
+    misses.push("too rambling to stay sharp");
+  }
+  if (features.technical) {
+    score += 3;
+    hits.push("technical detail supports the cast");
+  }
+  if (features.vagueCount) {
+    score -= Math.min(18, features.vagueCount * 6);
+    misses.push("vague or generic wording weakens control");
   }
 
-  score = Math.min(100, score);
+  score = Math.max(0, Math.min(100, score));
   const quality: Quality =
     score >= 82 ? "critical" : score >= 58 ? "solid" : score >= 30 ? "weak" : "misfire";
-  const damage = quality === "critical" ? 36 : quality === "solid" ? 24 : quality === "weak" ? 12 : 5;
+  const damage = serverDamageFromScore(score);
   const reason =
     quality === "critical" || quality === "solid"
       ? `Strong craft: ${hits.slice(0, 2).join(", ")}.`
       : misses.length
         ? `Weak craft: ${misses.slice(0, 2).join(", ")}.`
         : "The casting lacks any decisive prompt technique.";
-  const improvement = misses.length
-    ? `Fix this next: ${misses[0]}.`
-    : "Refine further: specify the exact output format the bind should produce.";
+  const improvement =
+    quality === "critical"
+      ? "Refine further: name the exact weakness or risk the strike exploits."
+      : misses.length
+        ? `Fix this next: ${misses[0]}.`
+        : "Refine further: name the exact weakness or risk the strike exploits.";
 
-  return {
+  return applyPromptcraftBounds({
     score,
     quality,
     damage,
     reason,
     terminalText:
       quality === "critical"
-        ? "Green fire compiles into a flawless binding pattern."
+        ? "Green fire closes every ambiguity and the goblin's loopholes collapse."
         : quality === "solid"
-          ? "The glyphs lock, then cut through the goblin's escape ward."
+          ? "The spell forms a clear path through the parser's fog."
           : quality === "weak"
-            ? "The spell sparks against a malformed token shield."
+            ? "The spell sparks, but vague edges leave the ward intact."
             : "The incantation collapses into inert terminal noise.",
     improvement,
     source: "fallback"
-  };
+  }, payload);
 }
 
 function normalizeQuality(value: unknown, score: number): Quality {
@@ -284,5 +491,9 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 
 function clampText(value: unknown, fallback: string, maxLength: number) {
   const text = typeof value === "string" && value.trim() ? value.trim() : fallback;
-  return text.slice(0, maxLength);
+  if (text.length <= maxLength) return text;
+  const truncated = text.slice(0, Math.max(0, maxLength - 1)).trimEnd();
+  const lastSpace = truncated.lastIndexOf(" ");
+  const clipped = lastSpace > Math.floor(maxLength * 0.55) ? truncated.slice(0, lastSpace) : truncated;
+  return `${clipped.replace(/[.,;:!?-]+$/, "")}…`;
 }

@@ -36,7 +36,7 @@ const ENEMY = {
   name: "Regex Goblin",
   role: "parser ambusher",
   maxHp: 170,
-  weakness: "precise · structured · syntax-focused",
+  weakness: "role · target · tactic · result",
   attacks: [
     { label: "Unexpected Token", dmg: 13 },
     { label: "Escaped Slash", dmg: 11 },
@@ -46,22 +46,22 @@ const ENEMY = {
 
 const RELICS = [
   { sigil: "SYS", name: "System Prompt Crown", rule: 'opens with "you are…"', test: (p: string) => /^\s*you are\b/i.test(p) },
-  { sigil: "CLR", name: "Clarity Gem", rule: "precise · concise · specific · structured", test: (p: string) => /\b(precise|concise|specific|structured)\b/i.test(p) },
-  { sigil: "CTX", name: "Context Blade", rule: "names the enemy directly", test: (p: string) => p.toLowerCase().includes("regex goblin") }
+  { sigil: "CLR", name: "Clarity Gem", rule: "clear · concrete · tactical · checkable", test: (p: string) => /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/i.test(p) },
+  { sigil: "CTX", name: "Context Blade", rule: "names the enemy directly", test: (p: string) => /\b(regex goblin|goblin)\b/i.test(p) }
 ];
 
 // Skeletons only — every scoring part is a [blank] the player must write themselves.
 const PRESETS = [
-  { glyph: "{ }", label: "Structured", teaches: "role + steps", text: "You are [your caster role]. Target [name the enemy]. Defeat it by [a precise, structured technique], then [a second concrete step]. Keep the spell [your constraint]." },
-  { glyph: "/^/", label: "Regex", teaches: "concrete pattern", text: "You are [your caster role]. Bind [name the enemy] with this exact pattern: [write a concrete regex], and explain [what each part of it does]." },
-  { glyph: "»»", label: "Fast", teaches: "terse + precise", text: "[one precise command verb] [name the enemy] using [a specific syntax technique]; [one tight constraint]." }
+  { glyph: "{ }", label: "Tactical", teaches: "role + action", text: "You are [your fighter or caster role]. Attack [name the enemy] with [specific tactic] so it [desired effect], then [confirm the result]." },
+  { glyph: "✦", label: "Cinematic", teaches: "vivid + precise", text: "You are [combat persona]. Strike [name the enemy] at [specific weak point] using [vivid action], while avoiding [risk or wasted move]." },
+  { glyph: "✓", label: "Check", teaches: "effect + verify", text: "[role or perspective]: [clear action] [name the enemy], make it [result], avoid [failure], and confirm [success sign]." }
 ];
 
 type TourStep = { selector: string; title: string; body: string; placement?: "top" | "bottom" | "left" | "right" | "center" };
 
 const TOUR_STEPS: TourStep[] = [
   { selector: "", placement: "center", title: "Welcome, Prompt Mage", body: "In PromptCaster your prompts are your spells. There are no attack buttons — you write your way to victory. Here's the battlefield." },
-  { selector: ".composer-panel", placement: "left", title: "Compose your spell", body: "Write a prompt aimed at the Regex Goblin's weakness: precise, structured, syntax-focused. This is your weapon — craft it well." },
+  { selector: ".composer-panel", placement: "left", title: "Compose your spell", body: "Write a prompt with a role, target, action, and result. Add tactics or confirmation to make it hit harder." },
   { selector: ".relics-panel", placement: "top", title: "Relics — live feedback", body: "These charge as your prompt gains a clear role, clarity terms, and names the enemy. Light all three for a stronger cast." },
   { selector: ".cast-btn", placement: "top", title: "Cast the spell", body: "Fire your prompt with the button or ⌘/Ctrl + Enter. The Arbiter scores it, and damage scales directly with that score." },
   { selector: ".arena-panel", placement: "right", title: "The arena", body: "Watch your spell strike here. After every cast the goblin retaliates — so a sharper prompt that ends the fight faster keeps you alive." },
@@ -74,7 +74,7 @@ const OPENING_LOGS: Omit<LogEntry, "id">[] = [
   { ts: 0, tone: "system", text: "BOOT — combat kernel online." },
   { ts: 1, tone: "warning", text: "HOSTILE — Regex Goblin detected in the dungeon parser." },
   { ts: 2, tone: "system", text: "DIRECTIVE — write a spell prompt, then cast." },
-  { ts: 3, tone: "system", text: "WEAKNESS — precise, structured, syntax-focused prompts." }
+  { ts: 3, tone: "system", text: "WEAKNESS — clear role, target, tactic, result." }
 ];
 
 // ---------- helpers ----------
@@ -105,7 +105,11 @@ function patternResistance(spell: string, history: Set<string>[]): { multiplier:
 
 function clampText(value: unknown, fallback: string, maxLength: number) {
   const text = typeof value === "string" && value.trim() ? value.trim() : fallback;
-  return text.slice(0, maxLength);
+  if (text.length <= maxLength) return text;
+  const truncated = text.slice(0, Math.max(0, maxLength - 1)).trimEnd();
+  const lastSpace = truncated.lastIndexOf(" ");
+  const clipped = lastSpace > Math.floor(maxLength * 0.55) ? truncated.slice(0, lastSpace) : truncated;
+  return `${clipped.replace(/[.,;:!?-]+$/, "")}…`;
 }
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
   const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -124,29 +128,147 @@ function normalizeClientJudge(raw: Partial<JudgeResult>): JudgeResult {
     damage: damageFromScore(score),
     reason: clampText(raw.reason, "The Arbiter finds nothing decisive in this casting.", 180),
     terminalText: clampText(raw.terminalText, "The spell resolves into flat terminal static.", 140),
-    improvement: clampText(raw.improvement, "Add an explicit role, name the target, and give one concrete pattern.", 140),
+    improvement: clampText(raw.improvement, "Add a specific tactic, intended effect, and a way to confirm the hit worked.", 140),
     source: raw.source
   };
 }
 
 function localFallbackJudge(spell: string): JudgeResult {
   const text = spell.toLowerCase();
-  let score = 18;
-  if (/^\s*you are\b/i.test(spell)) score += 18;
-  if (/\b(precise|concise|specific|structured)\b/.test(text)) score += 18;
-  if (text.includes("regex goblin")) score += 16;
-  if (/\b(regex|syntax|pattern|escape|literal|token|constraint|step|json)\b/.test(text)) score += 18;
-  if (spell.length > 70 && spell.length < 360) score += 10;
-  if (/[{}[\]()/\\^$*+?.|]/.test(spell)) score += 10;
-  score = Math.min(100, score);
+  const role = /^\s*(you are|act as|as a)\b/i.test(spell);
+  const clarity = /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/.test(text);
+  const target = /\b(regex goblin|goblin|enemy|target|foe)\b/.test(text);
+  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry)\b/.test(text);
+  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell)\b/.test(text);
+  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic)\b/.test(text) || /\d/.test(spell);
+  const constraints = /\b(must|avoid|only|never|do not|require|requires|required|requirement|requirements|constraint|constraints|criteria|criterion|include|exclude|limit|without)\b/.test(text);
+  const structure = /\b(step|steps|first|then|finally|list|lists|listing|outline|sequence|plan|section|name|naming|give|giving|show|showing|finish|finishing)\b/.test(text);
+  const context = /\b(context|assumption|assumptions|edge case|edge cases|ambiguity|ambiguous|missing|audience|purpose)\b/.test(text);
+  const example = /\b(example|for example|sample|illustrate)\b/.test(text);
+  const confirmation = /\b(confirm|confirms|confirmation|check|checks|checking|verify|verifies|verification|validate|validation|review|ensure|report|success criteria|worked|lands|landed|final)\b/.test(text);
+  const adaptation = /\b(regex goblin|ambiguity|ambiguous|pattern|parser|malformed|loophole|ward|casting hand|next spell|next attack|weak point|escape|unexpected token|parentheses|slash)\b/.test(text);
+  const technical = /\b(regex|syntax|pattern|escape|literal|json|schema)\b/.test(text) || /[{}[\]()/\\^$*+?.|]/.test(spell);
+  const vagueMatches = text.match(/\b(maybe|stuff|things|somehow|good|better|destroy)\b/g) ?? [];
+  let score = 8;
+  const hits: string[] = [];
+  const misses: string[] = [];
+  if (role) {
+    score += 12;
+    hits.push("role");
+  } else {
+    misses.push("add a role or perspective");
+  }
+  if (clarity) {
+    score += 5;
+    hits.push("clarity");
+  } else {
+    misses.push("make the wording more specific");
+  }
+  if (target) {
+    score += 12;
+    hits.push("target");
+  } else {
+    misses.push("name the enemy or target");
+  }
+  if (action) {
+    score += 12;
+    hits.push("action");
+  } else {
+    misses.push("add a clear action");
+  }
+  if (effect) {
+    score += 10;
+    hits.push("effect");
+  } else {
+    misses.push("say what should happen to the enemy");
+  }
+  if (specificity) {
+    score += 8;
+    hits.push("specificity");
+  } else {
+    misses.push("add a tactic, weak point, or concrete detail");
+  }
+  if (constraints) {
+    score += 10;
+    hits.push("constraints");
+  } else {
+    misses.push("add a must/avoid/only constraint");
+  }
+  if (structure) {
+    score += 8;
+    hits.push("structure");
+  } else {
+    misses.push("add sequence or priority");
+  }
+  if (context) {
+    score += 6;
+    hits.push("context");
+  } else {
+    misses.push("handle context or edge cases");
+  }
+  if (example) {
+    score += 8;
+    hits.push("example");
+  }
+  if (confirmation) {
+    score += 10;
+    hits.push("confirmation");
+  } else {
+    misses.push("add a confirmation or success check");
+  }
+  if (adaptation) {
+    score += 10;
+    hits.push("adaptation");
+  } else {
+    misses.push("connect the move to the goblin's weakness or next attack");
+  }
+  if (spell.length >= 60 && spell.length <= 360) score += 8;
+  else if (spell.length >= 30 && spell.length <= 520) score += 4;
+  else score -= 8;
+  if (technical) score += 3;
+  if (vagueMatches.length) score -= Math.min(18, vagueMatches.length * 6);
+  score = clamp(score, 0, 100);
+  const combatIntent = [role, target, action, effect, specificity].filter(Boolean).length;
+  const reliability = [constraints, structure, context, example, confirmation, adaptation].filter(Boolean).length;
+  const caps: number[] = [];
+  if (!target || !action) caps.push(35);
+  if (!effect) caps.push(55);
+  if (target && action && !effect && !specificity) caps.push(55);
+  if (!specificity) caps.push(72);
+  if (!constraints && !confirmation) caps.push(76);
+  if (!adaptation) caps.push(88);
+  if (!role && combatIntent < 4) caps.push(78);
+  if (spell.length < 45) caps.push(35);
+  if (vagueMatches.length >= 2 && combatIntent < 4) caps.push(35);
+  if (technical && !effect) caps.push(35);
+  if (technical && (combatIntent < 4 || !confirmation)) caps.push(68);
+  const capMax = caps.length ? Math.min(...caps) : 100;
+  const cappedScore = Math.min(score, capMax);
+  score =
+    combatIntent >= 4 && reliability >= 2 && spell.length >= 60 && spell.length <= 360 && !vagueMatches.length
+      ? Math.max(cappedScore, Math.min(82, capMax))
+      : combatIntent >= 5 && reliability >= 1 && spell.length >= 60 && spell.length <= 360 && !vagueMatches.length
+        ? Math.max(cappedScore, Math.min(58, capMax))
+        : cappedScore;
   const quality: Quality = score >= 82 ? "critical" : score >= 58 ? "solid" : score >= 30 ? "weak" : "misfire";
+  const nextFix =
+    !role ? "add a role or perspective"
+      : !target ? "name the enemy or target"
+        : !action ? "add a clear action"
+          : !effect ? "say what should happen to the enemy"
+            : !specificity ? "add a tactic, weak point, or concrete detail"
+              : !constraints && !confirmation ? "add a confirmation check or must/avoid constraint"
+                : !confirmation ? "add a confirmation or success check"
+                  : !constraints ? "add a must/avoid/only constraint"
+                    : !adaptation ? "connect the move to the goblin's weakness or next attack"
+                      : misses[0];
   return {
     score,
     quality,
     damage: damageFromScore(score),
-    reason: score >= 58 ? "Offline Arbiter: solid structure and syntax pressure — the relics resonate." : "Offline Arbiter: thin craft — weak role, vague intent, little syntax pressure.",
-    terminalText: score >= 58 ? "The glyphs compile and bite into the goblin's ward." : "The half-formed spell scatters into terminal static.",
-    improvement: score >= 58 ? "Refine further: state the exact output format the bind should enforce." : "Open with 'You are...', name the Regex Goblin, and add one concrete escaped pattern.",
+    reason: score >= 58 ? `Offline Arbiter: strong spellcraft — ${hits.slice(0, 3).join(", ")}.` : "Offline Arbiter: usable intent needs clearer target, action, effect, or tactic.",
+    terminalText: score >= 58 ? "The spell closes ambiguity and cuts through the goblin's ward." : "The half-formed spell scatters into terminal static.",
+    improvement: quality === "critical" ? "Refine further: name the exact weakness or risk the strike exploits." : nextFix ? `Fix this next: ${nextFix}.` : "Refine further: name the exact weakness or risk the strike exploits.",
     source: "fallback"
   };
 }
@@ -271,7 +393,7 @@ function App() {
         score: 0, quality: "misfire", damage: 0,
         reason: "The Arbiter rejects borrowed words: this spell was pasted or lifted verbatim from a template, not woven by you.",
         terminalText: "The stolen sigils refuse your voice and crumble into dead syntax.",
-        improvement: "Write the spell yourself — type your own role, target, pattern and constraint.",
+        improvement: "Write the spell yourself — type your own role, target, action, effect, and confirmation.",
         source: "fallback"
       };
     } else {
@@ -326,13 +448,13 @@ function App() {
       pushLog("warning", "BORROWED INCANTATION — pasted or unedited template text deals no damage. Rewrite it in your own words.");
     } else {
       pushLog("result", `${judgment.quality.toUpperCase()} · ${judgment.score}/100 — ${judgment.terminalText} (–${effectiveDamage} HP)`);
-      if (resisted) pushLog("warning", `RESISTED (${Math.round(similarity * 100)}% familiar) — base ${baseDamage} cut to ${effectiveDamage}. Vary your syntax.`);
+      if (resisted) pushLog("warning", `RESISTED (${Math.round(similarity * 100)}% familiar) — base ${baseDamage} cut to ${effectiveDamage}. Vary your approach.`);
     }
 
     if (nextEnemy <= 0) {
       window.setTimeout(() => {
         setPhase("won");
-        pushLog("system", "VICTORY — Regex Goblin dissolved into validated syntax.");
+        pushLog("system", "VICTORY — Regex Goblin dissolved into clarified intent.");
       }, 1200);
       return;
     }
@@ -643,7 +765,7 @@ function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, 
               onPaste={onPaste}
               disabled={disabled}
               maxLength={700}
-              placeholder="Type your own spell — e.g. You are a syntax mage. Bind the Regex Goblin with a precise anchored pattern and escape every slash…"
+              placeholder="Type your own spell — e.g. You are an old war fighter. Throw three precise knives at the Regex Goblin's casting hand, interrupt its spell, and confirm it loses health…"
               spellCheck={false}
             />
           </div>

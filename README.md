@@ -14,7 +14,7 @@ You play a Prompt Mage dueling the Regex Goblin inside a dungeon parser. There a
 
 ## What is it?
 
-PromptCaster turns prompt engineering into a combat system. Each turn you compose a prompt aimed at the enemy's weakness; the Arbiter grades your craft (clarity, structure, specificity, exploiting the weakness) and returns a score, a verdict, and a concrete tip on what to sharpen. Better prompts hit harder — sloppy ones fizzle.
+PromptCaster turns prompt engineering into a combat system. Each turn you compose a prompt aimed at the enemy's weakness; the Arbiter grades your spellcraft in two layers: usable combat intent (role, target, action, effect) and reliability upgrades (specific tactic, constraints, sequence, confirmation, enemy adaptation). Better prompts hit harder — sloppy ones fizzle.
 
 It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** interface: tight borders, mono type, a live combat "viewport," and restrained mint/coral/amber accents. The prompt is the weapon, the arena is the scope, the judge is the trigger.
 
@@ -24,7 +24,7 @@ It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** 
 
 ## How to play
 
-1. **Write a spell** in the composer. Aim at the Regex Goblin's weakness: *precise, structured, syntax-focused* prompts.
+1. **Write a spell** in the composer. Aim at the Regex Goblin's weakness: role, target, tactic, and result. Add constraints or confirmation for a harder hit.
 2. **Watch the relics light up** as your prompt satisfies them (see below) — they're live feedback on prompt quality.
 3. **Cast** (button or `⌘/Ctrl + Enter`). The Arbiter scores your prompt; **damage scales with the score**.
 4. **Read the verdict.** The Arbiter tells you what landed and exactly what to improve next turn.
@@ -35,8 +35,8 @@ It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** 
 | Sigil | Relic | Charges when your prompt… |
 |------|-------|----------------------------|
 | `SYS` | System Prompt Crown | opens with **"You are…"** |
-| `CLR` | Clarity Gem | uses **precise / concise / specific / structured** |
-| `CTX` | Context Blade | names the **Regex Goblin** directly |
+| `CLR` | Clarity Gem | uses **clear / concrete / tactical / checkable** spellcraft language |
+| `CTX` | Context Blade | names the **Regex Goblin** or goblin directly |
 
 ---
 
@@ -46,18 +46,18 @@ When you cast, the frontend sends a compact payload to the backend, which asks a
 
 ```json
 { "enemy": "Regex Goblin",
-  "weakness": "precise structured syntax-focused prompts",
+  "weakness": "role · target · tactic · result",
   "relics": ["System Prompt Crown", "Clarity Gem", "Context Blade"],
-  "playerPrompt": "You are a regex exorcist. Bind the Regex Goblin with /^valid\\/(token|slash)$/ …" }
+  "playerPrompt": "You are an old war fighter. Throw three precise knives at the Regex Goblin's casting hand, interrupt its spell, and confirm it loses health." }
 ```
 
 The Arbiter returns a sharp, in-character critique:
 
 ```json
-{ "score": 88, "quality": "critical", "damage": 39,
-  "reason": "Opens with a clear role and anchors an escaped regex to the goblin's exact weakness — surgical.",
-  "terminalText": "The pattern locks shut like a closing bracket; the goblin's syntax unravels into validated ash.",
-  "improvement": "State the expected output format so the bind cannot be reinterpreted." }
+{ "score": 86, "quality": "critical", "damage": 39,
+  "reason": "Strong roleplay prompt: target, tactic, effect, and confirmation all guide the strike.",
+  "terminalText": "Three knives pin the casting hand; the goblin's next spell dies before it forms.",
+  "improvement": "Sharpen further: name the exact weakness the strike exploits." }
 ```
 
 - **No combat history is ever sent** — only the four fields above.

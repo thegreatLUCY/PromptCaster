@@ -87,8 +87,8 @@ The whole point is *writing* prompts, so shortcuts are neutralized:
 | Sigil | Charges when prompt… | test |
 |------|----------------------|------|
 | SYS | opens with "you are…" | `/^\s*you are\b/i` |
-| CLR | uses precise/concise/specific/structured | `/\b(precise|concise|specific|structured)\b/i` |
-| CTX | names the enemy | includes `"regex goblin"` |
+| CLR | uses clear/concrete/tactical/checkable spellcraft language | `/\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/i` |
+| CTX | names the enemy | includes `"regex goblin"` or `"goblin"` |
 
 Shown both as live chips in the composer footer and as the bottom-row **Relics** panel.
 
@@ -113,7 +113,7 @@ t=1280   else enemy attack: playerHp-=dmg; floater; log 'enemy'; turn++; regen; 
 
 ```json
 { "enemy": "Regex Goblin",
-  "weakness": "precise structured syntax-focused prompts",
+  "weakness": "role · target · tactic · result",
   "relics": ["System Prompt Crown","Clarity Gem","Context Blade"],
   "playerPrompt": "..." }
 ```
@@ -127,15 +127,21 @@ No combat history is ever sent. Returns JSON with these keys:
   "improvement": "one concrete fix to raise the score" }
 ```
 
-- `server.ts` `SYSTEM_PROMPT` casts the judge as **"THE ARBITER"** — a ruthless master
-  prompt-engineer. `temperature: 0.45`, `max_tokens: 260`, `response_format: json_object`,
-  two worked examples (critical + misfire) anchor the tone.
+- `server.ts` `SYSTEM_PROMPT` casts the judge as **"THE ARBITER"** — a constructive combat
+  coach and master prompt-engineer. The rubric now evaluates two layers: combat intent
+  (role/persona, target, action, intended effect, specificity) and reliability upgrades
+  (constraints, sequence, context/examples, confirmation, enemy adaptation). Regex/code
+  symbols are optional flavor only and should not be over-rewarded.
+  `temperature: 0.3`, `max_tokens: 180`, `response_format: json_object`, score bands,
+  recognition rules, and hard caps anchor the tone.
 - Both server and client **normalize/clamp** the result (reason ≤180, terminalText ≤140,
   improvement ≤140). Client recomputes `damage = damageFromScore(score)`.
 - **Cache** keyed by `enemy + prompt` (server `cache` Map + client `cacheRef`); repeats
   return `source:"cache"`.
 - **Fallback:** if the provider fails or no key is set, a deterministic local scorer runs
-  (same heuristics as the relics + length + metacharacters), so the game always plays.
+  (role, target, action, intended effect, specificity, constraints, structure, context,
+  examples, confirmation, enemy adaptation, length, and small optional technical-detail
+  bonus), so the game always plays.
   Top-bar pill shows `LLM JUDGE` vs `LOCAL JUDGE`.
 - The verdict (quality · score, `reason`, and `▸ TO IMPROVE: improvement`) renders in the
   bottom-row **ARBITER · VERDICT** panel; `RESISTED`/`REJECTED` states are reflected there.
@@ -225,5 +231,5 @@ Dependency-free guided walkthrough (`OnboardingTour` + `TOUR_STEPS` in `src/main
 curl -s http://localhost:5173/api/judge-status
 curl -s -X POST http://localhost:5173/api/judge-prompt \
   -H 'Content-Type: application/json' \
-  -d '{"enemy":"Regex Goblin","weakness":"precise structured syntax-focused prompts","relics":["System Prompt Crown","Clarity Gem","Context Blade"],"playerPrompt":"You are a precise regex exorcist. Bind the Regex Goblin with /^valid\\/(token|slash)$/ and escape every literal slash."}' | python3 -m json.tool
+  -d '{"enemy":"Regex Goblin","weakness":"role · target · tactic · result","relics":["System Prompt Crown","Clarity Gem","Context Blade"],"playerPrompt":"You are an old war fighter. Throw three precise knives at the Regex Goblin casting hand, interrupt its spell, and confirm it loses health."}' | python3 -m json.tool
 ```
