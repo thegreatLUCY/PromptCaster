@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 type Quality = "misfire" | "weak" | "solid" | "critical";
-type Phase = "playing" | "casting" | "won" | "lost";
+type Phase = "playing" | "casting" | "revealing" | "won" | "lost";
 type Tone = "system" | "player" | "result" | "enemy" | "warning";
 
 type JudgeResult = {
@@ -23,6 +23,22 @@ type LogEntry = { id: number; ts: number; tone: Tone; text: string };
 type Floater = { id: number; target: "enemy" | "player"; text: string; quality: Quality | "enemy" };
 type JudgeStatus = { mode: "llm" | "fallback"; model: string; baseUrl: string | null };
 type Vars = React.CSSProperties & Record<`--${string}`, string | number>;
+type Enemy = {
+  id: "regex-goblin" | "null-oracle";
+  name: string;
+  terminalName: string;
+  role: string;
+  maxHp: number;
+  weakness: string;
+  attacks: { label: string; dmg: number }[];
+  aliases: string[];
+  adaptationTerms: string[];
+  placeholder: string;
+  openingLog: string;
+  revealLog: string;
+  defeatLog: string;
+  finalVictoryLog: string;
+};
 
 // ---------- balance (preserved from the tuned game logic) ----------
 const PLAYER_MAX_HP = 90;
@@ -32,22 +48,47 @@ const MAX_HIT = 44;
 const PATTERN_MEMORY = 3;
 const BLANK_PATTERN = /\[[^\]]+\]/;
 
-const ENEMY = {
-  name: "Regex Goblin",
-  role: "parser ambusher",
-  maxHp: 170,
-  weakness: "role · target · tactic · result",
-  attacks: [
-    { label: "Unexpected Token", dmg: 13 },
-    { label: "Escaped Slash", dmg: 11 },
-    { label: "Parentheses Trap", dmg: 15 }
-  ]
-};
-
-const RELICS = [
-  { sigil: "SYS", name: "System Prompt Crown", rule: 'opens with "you are…"', test: (p: string) => /^\s*you are\b/i.test(p) },
-  { sigil: "CLR", name: "Clarity Gem", rule: "clear · concrete · tactical · checkable", test: (p: string) => /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/i.test(p) },
-  { sigil: "CTX", name: "Context Blade", rule: "names the enemy directly", test: (p: string) => /\b(regex goblin|goblin)\b/i.test(p) }
+const ENEMIES: Enemy[] = [
+  {
+    id: "regex-goblin",
+    name: "Regex Goblin",
+    terminalName: "regex_goblin",
+    role: "parser ambusher",
+    maxHp: 170,
+    weakness: "role · target · tactic · result",
+    attacks: [
+      { label: "Unexpected Token", dmg: 13 },
+      { label: "Escaped Slash", dmg: 11 },
+      { label: "Parentheses Trap", dmg: 15 }
+    ],
+    aliases: ["regex goblin", "goblin"],
+    adaptationTerms: ["regex goblin", "goblin", "ambiguity", "ambiguous", "pattern", "parser", "malformed", "loophole", "ward", "casting hand", "next spell", "next attack", "weak point", "escape", "unexpected token", "parentheses", "slash"],
+    placeholder: "Type your own spell — e.g. You are an old war fighter. Throw three precise knives at the Regex Goblin's casting hand, interrupt its spell, and confirm it loses health…",
+    openingLog: "HOSTILE — Regex Goblin detected in the dungeon parser.",
+    revealLog: "BOSS 01 — Regex Goblin blocks the parser gate.",
+    defeatLog: "VICTORY — Regex Goblin dissolved into clarified intent.",
+    finalVictoryLog: "VICTORY — Regex Goblin dissolved into clarified intent."
+  },
+  {
+    id: "null-oracle",
+    name: "Null Oracle",
+    terminalName: "null_oracle",
+    role: "context devourer",
+    maxHp: 190,
+    weakness: "context · assumptions · success criteria · verification",
+    attacks: [
+      { label: "Missing Context", dmg: 14 },
+      { label: "False Premise", dmg: 16 },
+      { label: "Ambiguous Prophecy", dmg: 18 }
+    ],
+    aliases: ["null oracle", "oracle"],
+    adaptationTerms: ["null oracle", "oracle", "context", "assumption", "assumptions", "premise", "false premise", "success criteria", "criteria", "verification", "verify", "validate", "missing context", "prophecy", "truth", "evidence", "uncertainty"],
+    placeholder: "Type your own spell — e.g. You are a truth auditor. Give the Null Oracle clear context, state your assumptions, expose the false premise, and verify the success criteria…",
+    openingLog: "HOSTILE — Null Oracle detected behind the cleared parser gate.",
+    revealLog: "BOSS 02 — Null Oracle rises from missing context.",
+    defeatLog: "VICTORY — Null Oracle collapsed under verified truth.",
+    finalVictoryLog: "GAUNTLET CLEARED — every hostile prompt pattern is bound."
+  }
 ];
 
 // Skeletons only — every scoring part is a [blank] the player must write themselves.
@@ -64,23 +105,34 @@ const TOUR_STEPS: TourStep[] = [
   { selector: ".composer-panel", placement: "left", title: "Compose your spell", body: "Write a prompt with a role, target, action, and result. Add tactics or confirmation to make it hit harder." },
   { selector: ".relics-panel", placement: "top", title: "Relics — live feedback", body: "These charge as your prompt gains a clear role, clarity terms, and names the enemy. Light all three for a stronger cast." },
   { selector: ".cast-btn", placement: "top", title: "Cast the spell", body: "Fire your prompt with the button or ⌘/Ctrl + Enter. The Arbiter scores it, and damage scales directly with that score." },
-  { selector: ".arena-panel", placement: "right", title: "The arena", body: "Watch your spell strike here. After every cast the goblin retaliates — so a sharper prompt that ends the fight faster keeps you alive." },
-  { selector: ".stats", placement: "bottom", title: "Know the duel", body: "Your HP and tokens versus the goblin's HP. Tokens fuel each cast and scale with prompt length — concise spells cost less." },
+  { selector: ".arena-panel", placement: "right", title: "The arena", body: "Watch your spell strike here. After every cast the enemy retaliates — so a sharper prompt that ends the fight faster keeps you alive." },
+  { selector: ".stats", placement: "bottom", title: "Know the duel", body: "Your HP and tokens versus the enemy's HP. Tokens fuel each cast and scale with prompt length — concise spells cost less." },
   { selector: ".verdict-panel", placement: "top", title: "The Arbiter's verdict", body: "After each cast the Arbiter critiques your craft and tells you exactly what to improve. Read it — it's how you get better." },
   { selector: ".log-panel", placement: "top", title: "Combat log", body: "Every cast, hit, and verdict is recorded here. That's the loop: write, cast, read, refine. Good luck, mage." }
-];
-
-const OPENING_LOGS: Omit<LogEntry, "id">[] = [
-  { ts: 0, tone: "system", text: "BOOT — combat kernel online." },
-  { ts: 1, tone: "warning", text: "HOSTILE — Regex Goblin detected in the dungeon parser." },
-  { ts: 2, tone: "system", text: "DIRECTIVE — write a spell prompt, then cast." },
-  { ts: 3, tone: "system", text: "WEAKNESS — clear role, target, tactic, result." }
 ];
 
 // ---------- helpers ----------
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const damageFromScore = (score: number) => Math.max(3, Math.round((score / 100) * MAX_HIT));
 const formatTurn = (n: number) => String(n).padStart(2, "0");
+
+function getRequestedEnemyIndex() {
+  if (typeof window === "undefined") return 0;
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get("boss") ?? params.get("enemy") ?? params.get("start") ?? "").trim().toLowerCase();
+  if (["2", "02", "null-oracle", "null oracle", "oracle"].includes(requested)) return 1;
+  return 0;
+}
+
+function openingLogsFor(enemy: Enemy, bypassed = false): Omit<LogEntry, "id">[] {
+  return [
+    { ts: 0, tone: "system", text: "BOOT — combat kernel online." },
+    ...(bypassed ? [{ ts: 1, tone: "warning" as const, text: "TEST OVERRIDE — Regex Goblin bypassed via URL." }] : []),
+    { ts: bypassed ? 2 : 1, tone: "warning", text: enemy.openingLog },
+    { ts: bypassed ? 3 : 2, tone: "system", text: "DIRECTIVE — write a spell prompt, then cast." },
+    { ts: bypassed ? 4 : 3, tone: "system", text: `WEAKNESS — ${enemy.weakness}.` }
+  ];
+}
 
 function logSigil(tone: Tone) {
   return ({ system: "⚙", player: "▸", result: "✦", enemy: "☠", warning: "!" } as const)[tone] || "·";
@@ -101,6 +153,18 @@ function patternResistance(spell: string, history: Set<string>[]): { multiplier:
   const similarity = Math.max(...history.map((h) => jaccard(cur, h)));
   const multiplier = similarity >= 0.85 ? 0.2 : similarity >= 0.65 ? 0.45 : similarity >= 0.5 ? 0.7 : 1;
   return { multiplier, similarity };
+}
+
+function hasAnyTerm(text: string, terms: string[]) {
+  return terms.some((term) => text.includes(term));
+}
+
+function buildRelics(enemy: Enemy) {
+  return [
+    { sigil: "SYS", name: "System Prompt Crown", rule: 'opens with "you are…"', test: (p: string) => /^\s*you are\b/i.test(p) },
+    { sigil: "CLR", name: "Clarity Gem", rule: "clear · concrete · tactical · checkable", test: (p: string) => /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/i.test(p) },
+    { sigil: "CTX", name: "Context Blade", rule: "names the enemy directly", test: (p: string) => hasAnyTerm(p.toLowerCase(), enemy.aliases) }
+  ];
 }
 
 function clampText(value: unknown, fallback: string, maxLength: number) {
@@ -133,20 +197,20 @@ function normalizeClientJudge(raw: Partial<JudgeResult>): JudgeResult {
   };
 }
 
-function localFallbackJudge(spell: string): JudgeResult {
+function localFallbackJudge(spell: string, enemy: Enemy): JudgeResult {
   const text = spell.toLowerCase();
   const role = /^\s*(you are|act as|as a)\b/i.test(spell);
   const clarity = /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/.test(text);
-  const target = /\b(regex goblin|goblin|enemy|target|foe)\b/.test(text);
-  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry)\b/.test(text);
-  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell)\b/.test(text);
-  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic)\b/.test(text) || /\d/.test(spell);
+  const target = hasAnyTerm(text, enemy.aliases) || /\b(enemy|target|foe|boss|hostile)\b/.test(text);
+  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry|define|verify|validate|audit|question|challenge|test|prove)\b/.test(text);
+  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell|clarify|clarified|verify|verified|validate|validated|false premise|success criteria|truth|context)\b/.test(text);
+  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic|context|assumption|assumptions|premise|criteria|success criteria|evidence|verification)\b/.test(text) || /\d/.test(spell);
   const constraints = /\b(must|avoid|only|never|do not|require|requires|required|requirement|requirements|constraint|constraints|criteria|criterion|include|exclude|limit|without)\b/.test(text);
   const structure = /\b(step|steps|first|then|finally|list|lists|listing|outline|sequence|plan|section|name|naming|give|giving|show|showing|finish|finishing)\b/.test(text);
   const context = /\b(context|assumption|assumptions|edge case|edge cases|ambiguity|ambiguous|missing|audience|purpose)\b/.test(text);
   const example = /\b(example|for example|sample|illustrate)\b/.test(text);
   const confirmation = /\b(confirm|confirms|confirmation|check|checks|checking|verify|verifies|verification|validate|validation|review|ensure|report|success criteria|worked|lands|landed|final)\b/.test(text);
-  const adaptation = /\b(regex goblin|ambiguity|ambiguous|pattern|parser|malformed|loophole|ward|casting hand|next spell|next attack|weak point|escape|unexpected token|parentheses|slash)\b/.test(text);
+  const adaptation = hasAnyTerm(text, enemy.adaptationTerms);
   const technical = /\b(regex|syntax|pattern|escape|literal|json|schema)\b/.test(text) || /[{}[\]()/\\^$*+?.|]/.test(spell);
   const vagueMatches = text.match(/\b(maybe|stuff|things|somehow|good|better|destroy)\b/g) ?? [];
   let score = 8;
@@ -220,7 +284,7 @@ function localFallbackJudge(spell: string): JudgeResult {
     score += 10;
     hits.push("adaptation");
   } else {
-    misses.push("connect the move to the goblin's weakness or next attack");
+    misses.push("connect the move to the enemy's weakness or next attack");
   }
   if (spell.length >= 60 && spell.length <= 360) score += 8;
   else if (spell.length >= 30 && spell.length <= 520) score += 4;
@@ -260,14 +324,14 @@ function localFallbackJudge(spell: string): JudgeResult {
               : !constraints && !confirmation ? "add a confirmation check or must/avoid constraint"
                 : !confirmation ? "add a confirmation or success check"
                   : !constraints ? "add a must/avoid/only constraint"
-                    : !adaptation ? "connect the move to the goblin's weakness or next attack"
+                    : !adaptation ? "connect the move to the enemy's weakness or next attack"
                       : misses[0];
   return {
     score,
     quality,
     damage: damageFromScore(score),
     reason: score >= 58 ? `Offline Arbiter: strong spellcraft — ${hits.slice(0, 3).join(", ")}.` : "Offline Arbiter: usable intent needs clearer target, action, effect, or tactic.",
-    terminalText: score >= 58 ? "The spell closes ambiguity and cuts through the goblin's ward." : "The half-formed spell scatters into terminal static.",
+    terminalText: score >= 58 ? `The spell exploits ${enemy.name}'s flaw and cuts through its ward.` : "The half-formed spell scatters into terminal static.",
     improvement: quality === "critical" ? "Refine further: name the exact weakness or risk the strike exploits." : nextFix ? `Fix this next: ${nextFix}.` : "Refine further: name the exact weakness or risk the strike exploits.",
     source: "fallback"
   };
@@ -275,13 +339,16 @@ function localFallbackJudge(spell: string): JudgeResult {
 
 // ---------- root ----------
 function App() {
+  const initialEnemyIndex = useMemo(() => getRequestedEnemyIndex(), []);
+  const initialLogs = useMemo(() => openingLogsFor(ENEMIES[initialEnemyIndex], initialEnemyIndex > 0), [initialEnemyIndex]);
+  const [enemyIndex, setEnemyIndex] = useState(initialEnemyIndex);
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [tokens, setTokens] = useState(PLAYER_MAX_TOKENS);
-  const [enemyHp, setEnemyHp] = useState(ENEMY.maxHp);
+  const [enemyHp, setEnemyHp] = useState(ENEMIES[initialEnemyIndex].maxHp);
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("playing");
   const [turn, setTurn] = useState(1);
-  const [logs, setLogs] = useState<LogEntry[]>(() => OPENING_LOGS.map((l, i) => ({ ...l, id: i + 1 })));
+  const [logs, setLogs] = useState<LogEntry[]>(() => initialLogs.map((l, i) => ({ ...l, id: i + 1 })));
   const [lastJudge, setLastJudge] = useState<JudgeResult | null>(null);
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const [beam, setBeam] = useState<number | false>(false);
@@ -290,6 +357,8 @@ function App() {
   const [borrowed, setBorrowed] = useState(false);
   const [judgeStatus, setJudgeStatus] = useState<JudgeStatus | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
+  const enemy = ENEMIES[enemyIndex];
+  const finalEnemy = enemyIndex === ENEMIES.length - 1;
 
   // Auto-start the tour on first visit; remember dismissal.
   useEffect(() => {
@@ -312,7 +381,7 @@ function App() {
   const logEnd = useRef<HTMLDivElement>(null);
   const floaterId = useRef(1);
   const logId = useRef(10);
-  const tsRef = useRef(OPENING_LOGS.length);
+  const tsRef = useRef(initialLogs.length);
 
   useEffect(() => {
     if (logEnd.current) logEnd.current.scrollTop = logEnd.current.scrollHeight;
@@ -364,10 +433,11 @@ function App() {
     setBorrowed(false);
   }
 
-  const relicState = useMemo(() => RELICS.map((r) => ({ ...r, on: r.test(prompt) })), [prompt]);
+  const relics = useMemo(() => buildRelics(enemy), [enemy]);
+  const relicState = useMemo(() => relics.map((r) => ({ ...r, on: r.test(prompt) })), [prompt, relics]);
   const relicsOn = relicState.filter((r) => r.on).length;
   const promptCost = clamp(Math.ceil(prompt.trim().length / 16), 6, 26);
-  const intent = ENEMY.attacks[(turn - 1) % ENEMY.attacks.length];
+  const intent = enemy.attacks[(turn - 1) % enemy.attacks.length];
   const battleOver = phase === "won" || phase === "lost";
   const hasBlanks = BLANK_PATTERN.test(prompt);
   const canCast = phase === "playing" && prompt.trim().length > 0 && tokens >= promptCost && !hasBlanks;
@@ -380,7 +450,7 @@ function App() {
       return;
     }
     const spell = prompt.trim();
-    const cacheKey = `${ENEMY.name.toLowerCase()}::${spell.toLowerCase()}`;
+    const cacheKey = `${enemy.name.toLowerCase()}::${spell.toLowerCase()}`;
     const borrowedCast = borrowed;
 
     setPhase("casting");
@@ -405,12 +475,12 @@ function App() {
           const res = await fetch("/api/judge-prompt", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ enemy: ENEMY.name, weakness: ENEMY.weakness, relics: RELICS.map((r) => r.name), playerPrompt: spell })
+            body: JSON.stringify({ enemy: enemy.name, weakness: enemy.weakness, relics: relicState.filter((r) => r.on).map((r) => r.name), playerPrompt: spell })
           });
           if (!res.ok) throw new Error("judge rejected");
           judgment = normalizeClientJudge(await res.json());
         } catch {
-          judgment = localFallbackJudge(spell);
+          judgment = localFallbackJudge(spell, enemy);
         }
         cacheRef.current.set(cacheKey, judgment);
       }
@@ -453,8 +523,36 @@ function App() {
 
     if (nextEnemy <= 0) {
       window.setTimeout(() => {
-        setPhase("won");
-        pushLog("system", "VICTORY — Regex Goblin dissolved into clarified intent.");
+        pushLog("system", enemy.defeatLog);
+        if (finalEnemy) {
+          setPhase("won");
+          pushLog("system", enemy.finalVictoryLog);
+          return;
+        }
+
+        const nextIndex = enemyIndex + 1;
+        const nextBoss = ENEMIES[nextIndex];
+        setPhase("revealing");
+        pushLog("warning", "DEEPER SIGNAL DETECTED.");
+        pushLog("warning", nextBoss.revealLog);
+        pushLog("system", "RESTORE — HP and tokens returned to full capacity.");
+        pushLog("system", `WEAKNESS — ${nextBoss.weakness}.`);
+        setPlayerHp(PLAYER_MAX_HP);
+        setTokens(PLAYER_MAX_TOKENS);
+        setTurn(1);
+        setPrompt("");
+        setLastJudge(null);
+        setBorrowed(false);
+        borrowedChunksRef.current = [];
+        patternHistoryRef.current = [];
+        window.setTimeout(() => {
+          setEnemyIndex(nextIndex);
+          setEnemyHp(nextBoss.maxHp);
+          setHit(false);
+          setShake(false);
+          setFloaters([]);
+          setPhase("playing");
+        }, 650);
       }, 1200);
       return;
     }
@@ -464,11 +562,11 @@ function App() {
       const nextP = Math.max(0, playerHp - dmg);
       setPlayerHp(nextP);
       addFloater("player", `-${dmg}`, "enemy");
-      pushLog("enemy", `${ENEMY.name} casts ${intent.label}. –${dmg} HP.`);
+      pushLog("enemy", `${enemy.name} casts ${intent.label}. –${dmg} HP.`);
       setTurn((n) => n + 1);
       if (nextP <= 0) {
         setPhase("lost");
-        pushLog("warning", "DEFEAT — prompt stream went dark under malformed syntax.");
+        pushLog("warning", "DEFEAT — prompt stream went dark under hostile logic.");
       } else {
         setTokens((cur) => Math.min(PLAYER_MAX_TOKENS, cur + TOKEN_REGEN));
         setPhase("playing");
@@ -477,9 +575,10 @@ function App() {
   }
 
   function reset() {
+    setEnemyIndex(initialEnemyIndex);
     setPlayerHp(PLAYER_MAX_HP);
     setTokens(PLAYER_MAX_TOKENS);
-    setEnemyHp(ENEMY.maxHp);
+    setEnemyHp(ENEMIES[initialEnemyIndex].maxHp);
     setPrompt("");
     setPhase("playing");
     setTurn(1);
@@ -491,9 +590,9 @@ function App() {
     setBorrowed(false);
     borrowedChunksRef.current = [];
     patternHistoryRef.current = [];
-    setLogs(OPENING_LOGS.map((l, i) => ({ ...l, id: i + 1 })));
+    setLogs(initialLogs.map((l, i) => ({ ...l, id: i + 1 })));
     logId.current = 10;
-    tsRef.current = OPENING_LOGS.length;
+    tsRef.current = initialLogs.length;
   }
 
   // keyboard: ⌘/Ctrl + Enter casts
@@ -526,17 +625,17 @@ function App() {
         </div>
       </header>
 
-      <Stats playerHp={playerHp} tokens={tokens} enemyHp={enemyHp} intent={intent} hit={hit} casting={phase === "casting"} />
+      <Stats enemy={enemy} playerHp={playerHp} tokens={tokens} enemyHp={enemyHp} intent={intent} hit={hit} casting={phase === "casting"} />
 
       <section className="main">
         <ArenaPanel
-          phase={phase} playerHp={playerHp} enemyHp={enemyHp} beam={beam} hit={hit} shake={shake}
+          enemy={enemy} encounter={enemyIndex + 1} phase={phase} playerHp={playerHp} enemyHp={enemyHp} beam={beam} hit={hit} shake={shake}
           floaters={floaters} canCast={canCast}
         />
         <ComposerPanel
           prompt={prompt} updatePrompt={updatePrompt} onPaste={handlePromptPaste} loadPreset={loadPreset}
           promptCost={promptCost} relicState={relicState} phase={phase} canCast={canCast} cast={cast}
-          firstTurn={firstTurn} borrowed={borrowed} hasBlanks={hasBlanks}
+          firstTurn={firstTurn} borrowed={borrowed} hasBlanks={hasBlanks} placeholder={enemy.placeholder}
         />
       </section>
 
@@ -566,8 +665,8 @@ function App() {
             <div className="verdict">{phase === "won" ? "COMBAT · WON" : "PROCESS · KILLED"}</div>
             <div className="blurb">
               {phase === "won"
-                ? "The first binding holds. The dungeon parser is silent."
-                : "Your prompt stream went dark under malformed syntax."}
+                ? "The gauntlet is silent. Every hostile prompt pattern is bound."
+                : "Your prompt stream went dark under hostile logic."}
             </div>
             <button className="restart" onClick={reset}>restart battle</button>
           </div>
@@ -580,8 +679,8 @@ function App() {
 }
 
 // ---------- stats ----------
-function Stats({ playerHp, tokens, enemyHp, intent, hit, casting }: {
-  playerHp: number; tokens: number; enemyHp: number; intent: { label: string; dmg: number }; hit: boolean; casting: boolean;
+function Stats({ enemy, playerHp, tokens, enemyHp, intent, hit, casting }: {
+  enemy: Enemy; playerHp: number; tokens: number; enemyHp: number; intent: { label: string; dmg: number }; hit: boolean; casting: boolean;
 }) {
   return (
     <section className="stats">
@@ -600,12 +699,12 @@ function Stats({ playerHp, tokens, enemyHp, intent, hit, casting }: {
       <div className="vs-rail"><span className="line" /><span className="vs">vs</span><span className="line" /></div>
 
       <article className="combatant is-enemy">
-        <div className="avatar enemy"><GoblinSprite hit={hit} dead={enemyHp <= 0} /></div>
+        <div className="avatar enemy"><EnemySprite enemy={enemy} hit={hit} dead={enemyHp <= 0} /></div>
         <div className="combatant-meta">
-          <h2 className="combatant-name">Regex Goblin<span className="tag">hostile</span></h2>
-          <div className="combatant-role">{ENEMY.role}</div>
-          <div className="combatant-weak"><span className="k">weak to</span> {ENEMY.weakness}</div>
-          <div className="bars"><Bar label="hp" value={enemyHp} max={ENEMY.maxHp} kind="enemy" /></div>
+          <h2 className="combatant-name">{enemy.name}<span className="tag">hostile</span></h2>
+          <div className="combatant-role">{enemy.role}</div>
+          <div className="combatant-weak"><span className="k">weak to</span> {enemy.weakness}</div>
+          <div className="bars"><Bar label="hp" value={enemyHp} max={enemy.maxHp} kind="enemy" /></div>
           <div className="intent">
             <span className="k">next</span><span className="v">{intent.label}</span><span className="dmg">–{intent.dmg} hp</span>
           </div>
@@ -632,8 +731,8 @@ function Bar({ label, value, max, kind }: { label: string; value: number; max: n
 // ---------- arena ----------
 type RelicView = { sigil: string; name: string; rule: string; on: boolean };
 
-function ArenaPanel({ phase, playerHp, enemyHp, beam, hit, shake, floaters, canCast }: {
-  phase: Phase; playerHp: number; enemyHp: number; beam: number | false; hit: boolean; shake: boolean;
+function ArenaPanel({ enemy, encounter, phase, playerHp, enemyHp, beam, hit, shake, floaters, canCast }: {
+  enemy: Enemy; encounter: number; phase: Phase; playerHp: number; enemyHp: number; beam: number | false; hit: boolean; shake: boolean;
   floaters: Floater[]; canCast: boolean;
 }) {
   const motes = useMemo(() => Array.from({ length: 18 }, (_, i) => ({
@@ -641,15 +740,15 @@ function ArenaPanel({ phase, playerHp, enemyHp, beam, hit, shake, floaters, canC
     drift: (Math.random() - 0.5) * 40, size: Math.random() > 0.7 ? 3 : 2
   })), []);
   const armed = canCast && phase === "playing";
-  const enemyHpPct = clamp((enemyHp / ENEMY.maxHp) * 100, 0, 100);
+  const enemyHpPct = clamp((enemyHp / enemy.maxHp) * 100, 0, 100);
   const playerHpPct = clamp((playerHp / PLAYER_MAX_HP) * 100, 0, 100);
-  const status = phase === "playing" ? "ready" : phase === "casting" ? "casting…" : phase;
+  const status = phase === "playing" ? "ready" : phase === "casting" ? "casting…" : phase === "revealing" ? "revealing…" : phase;
 
   return (
     <section className="panel arena-panel">
       <div className="panel-header">
         <span className="h-title">arena · viewport</span>
-        <span className="h-meta">floor 01 · encounter 001</span>
+        <span className="h-meta">floor 01 · encounter {String(encounter).padStart(3, "0")}</span>
       </div>
       <div className={`arena ${shake ? "shake" : ""}`}>
         <div className="arena-floor" />
@@ -664,7 +763,7 @@ function ArenaPanel({ phase, playerHp, enemyHp, beam, hit, shake, floaters, canC
 
         <div className="scene-hud">
           <span className="row"><span className="led" /><span>live</span></span>
-          <span className="row"><span className="k">enc</span><span className="v">001</span></span>
+          <span className="row"><span className="k">enc</span><span className="v">{String(encounter).padStart(3, "0")}</span></span>
           {armed && <span className="row"><span className="led lock" /><span>lock</span></span>}
         </div>
         <div className="scene-hud-r"><span className={`v ${phase}`}>{status}</span></div>
@@ -683,13 +782,13 @@ function ArenaPanel({ phase, playerHp, enemyHp, beam, hit, shake, floaters, canC
           </div>
 
           <div className={`fig enemy ${hit ? "hit" : ""} ${enemyHp <= 0 ? "dead" : ""}`}>
-            <div className="fig-tag"><span>regex_goblin</span><span className="hp-mini"><i style={{ "--w": `${enemyHpPct}%` } as Vars} /></span></div>
+            <div className="fig-tag"><span>{enemy.terminalName}</span><span className="hp-mini"><i style={{ "--w": `${enemyHpPct}%` } as Vars} /></span></div>
             <div className="fig-stage">
               <div className={`reticle ${armed ? "armed" : ""} ${phase === "casting" ? "locked" : ""}`}>
                 <span className="r-bracket tl" /><span className="r-bracket tr" /><span className="r-bracket bl" /><span className="r-bracket br" /><span className="r-cross" />
               </div>
               <div className="fig-shadow" />
-              <GoblinSprite hit={hit} dead={enemyHp <= 0} />
+              <EnemySprite enemy={enemy} hit={hit} dead={enemyHp <= 0} />
               <div className="fig-pedestal" />
               {enemyHp > 0 && phase === "playing" && <div className="windup"><span className="dot" />winds up</div>}
               {floaters.filter((f) => f.target === "enemy").map((f) => (
@@ -740,12 +839,13 @@ function RelicsPanel({ relicState, relicsOn }: { relicState: RelicView[]; relics
 }
 
 // ---------- composer ----------
-function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, relicState, phase, canCast, cast, firstTurn, borrowed, hasBlanks }: {
+function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, relicState, phase, canCast, cast, firstTurn, borrowed, hasBlanks, placeholder }: {
   prompt: string; updatePrompt: (v: string) => void; onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void; loadPreset: (t: string) => void;
   promptCost: number; relicState: RelicView[]; phase: Phase; canCast: boolean; cast: () => void; firstTurn: boolean; borrowed: boolean; hasBlanks: boolean;
+  placeholder: string;
 }) {
   const lineCount = Math.max(8, prompt.split("\n").length + 1);
-  const disabled = phase === "casting" || phase === "won" || phase === "lost";
+  const disabled = phase === "casting" || phase === "revealing" || phase === "won" || phase === "lost";
 
   return (
     <section className="panel composer-panel">
@@ -765,25 +865,29 @@ function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, 
               onPaste={onPaste}
               disabled={disabled}
               maxLength={700}
-              placeholder="Type your own spell — e.g. You are an old war fighter. Throw three precise knives at the Regex Goblin's casting hand, interrupt its spell, and confirm it loses health…"
+              placeholder={placeholder}
               spellCheck={false}
             />
           </div>
           <div className="spell-meta">
-            <div>
-              {relicState.map((r) => (
-                <span key={r.sigil} className={`relic-chip ${r.on ? "on" : ""}`}><span className="d" />{r.sigil}</span>
-              ))}
+            <div className="spell-meta-left">
+              <div className="relic-chips">
+                {relicState.map((r) => (
+                  <span key={r.sigil} className={`relic-chip ${r.on ? "on" : ""}`}><span className="d" />{r.sigil}</span>
+                ))}
+              </div>
+              {(borrowed || hasBlanks) && (
+                <span className={`spell-note ${borrowed ? "borrowed" : "blanks"}`}>
+                  {borrowed
+                    ? "⚠ pasted text deals 0 damage — rewrite in your own words."
+                    : "✎ fill every [blank] with your own words before you can cast."}
+                </span>
+              )}
             </div>
-            <span className="right">{prompt.length} chars · ~{promptCost} tokens</span>
+            <span className="right">
+              {borrowed || hasBlanks ? `${prompt.length} · ~${promptCost} tok` : `${prompt.length} chars · ~${promptCost} tokens`}
+            </span>
           </div>
-          {(borrowed || hasBlanks) && (
-            <div className={`spell-note ${borrowed ? "borrowed" : "blanks"}`}>
-              {borrowed
-                ? "⚠ borrowed incantation — pasted text deals 0 damage. rewrite it in your own words."
-                : "✎ fill every [blank] with your own words before you can cast."}
-            </div>
-          )}
         </div>
 
         <div>
@@ -800,7 +904,7 @@ function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, 
 
         <div className="cast-row">
           <p className="cast-explain">
-            <b>contract:</b> the judge receives only enemy, weakness, relic names and your prompt — no history. damage scales with score; the goblin resists repeated patterns.
+            <b>contract:</b> the judge receives only enemy, weakness, active relic names and your prompt — no history. damage scales with score; the enemy resists repeated patterns.
           </p>
           <button className={`cast-btn ${firstTurn && canCast ? "pulse" : ""}`} disabled={!canCast} onClick={cast}>
             <span className="label">{phase === "casting" ? "casting…" : "cast"}</span>
@@ -948,6 +1052,12 @@ function OnboardingTour({ steps, open, onClose }: { steps: TourStep[]; open: boo
 }
 
 // ---------- sprites ----------
+function EnemySprite({ enemy, hit, dead }: { enemy: Enemy; hit: boolean; dead: boolean }) {
+  return enemy.id === "null-oracle"
+    ? <NullOracleSprite hit={hit} dead={dead} />
+    : <GoblinSprite hit={hit} dead={dead} />;
+}
+
 function MageSprite({ casting = false, orbActive = false }: { casting?: boolean; orbActive?: boolean }) {
   const accent = "var(--mage)";
   return (
@@ -1002,6 +1112,37 @@ function GoblinSprite({ hit = false, dead = false }: { hit?: boolean; dead?: boo
       <rect x="8" y="30" width="16" height="2" fill="#3a2f1f" />
       <rect x="10" y="36" width="3" height="3" fill="#2c332f" />
       <rect x="19" y="36" width="3" height="3" fill="#2c332f" />
+    </svg>
+  );
+}
+
+function NullOracleSprite({ hit = false, dead = false }: { hit?: boolean; dead?: boolean }) {
+  return (
+    <svg className="sprite oracle-sprite" viewBox="0 0 32 40" shapeRendering="crispEdges" aria-label="Null Oracle" data-dead={dead}>
+      <ellipse cx="16" cy="39" rx="10" ry="1" fill="rgba(0,0,0,0.55)" />
+      <rect x="11" y="31" width="10" height="6" fill="#242a33" />
+      <rect x="12" y="36" width="3" height="3" fill="#11161d" />
+      <rect x="17" y="36" width="3" height="3" fill="#11161d" />
+      <path d="M7 12 L25 12 L27 29 L5 29 Z" fill="#202734" />
+      <path d="M9 14 L23 14 L24 28 L8 28 Z" fill="#111821" />
+      <rect x="6" y="25" width="20" height="4" fill="#303949" />
+      <rect x="8" y="29" width="16" height="2" fill="#0b0f14" />
+      <rect x="4" y="18" width="4" height="9" fill="#151c25" />
+      <rect x="24" y="18" width="4" height="9" fill="#151c25" />
+      <path d="M10 8 L22 8 L25 13 L7 13 Z" fill="#303949" />
+      <rect x="11" y="6" width="10" height="3" fill="#161d27" />
+      <rect x="13" y="3" width="6" height="4" fill="#0f151e" />
+      <rect x="9" y="12" width="14" height="1" fill="#536071" />
+      <rect x="10" y="15" width="12" height="8" fill="#05080c" />
+      <rect className="oracle-eye" x="12" y="17" width="8" height="4" fill={hit ? "#f5f0d0" : "#9bf3d0"} />
+      <rect x="13" y="18" width="6" height="2" fill={hit ? "#ff776e" : "#0d1418"} />
+      <rect x="15" y="16" width="2" height="6" fill={hit ? "#ff776e" : "#f3f6f8"} opacity="0.65" />
+      <rect x="10" y="24" width="12" height="1" fill="#536071" opacity="0.7" />
+      <rect x="13" y="26" width="6" height="1" fill="#536071" opacity="0.55" />
+      <rect className="oracle-omen omen-a" x="4" y="9" width="2" height="2" fill="#9bf3d0" opacity="0.55" />
+      <rect className="oracle-omen omen-b" x="27" y="11" width="2" height="2" fill="#9bf3d0" opacity="0.45" />
+      <rect className="oracle-omen omen-c" x="2" y="23" width="2" height="2" fill="#9bf3d0" opacity="0.35" />
+      <rect className="oracle-omen omen-d" x="28" y="25" width="2" height="2" fill="#9bf3d0" opacity="0.5" />
     </svg>
   );
 }

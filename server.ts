@@ -29,8 +29,9 @@ const SYSTEM_PROMPT = [
   "You are THE ARBITER: a combat coach and master prompt-engineer judging spells in a dark roguelike where prompts are magic.",
   "Judge usable human intent first, advanced promptcraft second. A player may write as a warrior, mage, commander, rogue, analyst, or prompt coach. Do not require formal prompt-engineering language if the prompt clearly gives a role, target, action, and intended effect.",
   "Score in two layers. Layer 1 Combat Intent: role/persona, target, action, intended effect, and specific tactic. Layer 2 Promptcraft Reliability: constraints, sequence, enemy adaptation, examples/context, and confirmation/checking.",
-  "Regex Goblin represents ambiguity, malformed instructions, missing edge cases, and unclear success criteria. Literal regex/code syntax can help only when it supports the action; never require it, never over-reward symbols, anchors, JSON, or compiler jargon by themselves.",
-  "Recognition rules: combat actions like throw, strike, stab, cast, bind, interrupt, expose, disable, and weaken count as actions. Effects like lose health, damage, stop next attack, interrupt spell, break ward, or disable count as intended effects. Body parts, weak points, number of strikes, and named tactics count as specificity. 'check', 'confirm', 'verify', 'ensure', and 'report whether it worked' count as confirmation.",
+  "Each enemy represents a prompt failure mode. Regex Goblin tests role, target, tactic, and result against ambiguity and malformed instructions. Null Oracle tests context, assumptions, success criteria, verification, and false-premise handling.",
+  "Literal regex/code syntax can help only when it supports the action; never require it, never over-reward symbols, anchors, JSON, or compiler jargon by themselves.",
+  "Recognition rules: combat actions like throw, strike, stab, cast, bind, interrupt, expose, disable, audit, verify, challenge, and weaken count as actions. Effects like lose health, damage, stop next attack, interrupt spell, break ward, expose a false premise, clarify context, verify truth, or disable count as intended effects. Body parts, weak points, number of strikes, named tactics, assumptions, evidence, and success criteria count as specificity. 'check', 'confirm', 'verify', 'ensure', and 'report whether it worked' count as confirmation.",
   "Be constructive, not just critical. In `reason`, always name what worked before naming the flaw when there is any usable intent. In `improvement`, give a concrete upgrade phrase the player could add next cast.",
   "Do not give a critical score if `terminalText` says the strike failed, fizzled, or remains unformed. Critical and solid results must narrate a real hit; weak and misfire results may fail.",
   "In `terminalText`, narrate the spell's impact cinematically and seriously — dark fantasy with terminal/parser atmosphere. No emojis, no exclamation spam.",
@@ -164,7 +165,7 @@ async function judgeWithAi(payload: JudgeRequest): Promise<JudgeResult> {
               constraints: "Does it include must/avoid/only/without/requirements or risk control?",
               sequence: "Does it give steps, priority, or order of operations?",
               confirmation: "Does it ask to confirm, check, verify, ensure, or report whether it worked?",
-              enemyAdaptation: "Does it adapt to Regex Goblin's ambiguity, patterns, ward, next spell, or weak point?"
+              enemyAdaptation: "Does it adapt to the named enemy's stated weakness, next attack, ward, weak point, false premise, missing context, or failure mode?"
             },
             hardCaps: {
               noTargetOrAction: "Maximum 35 if there is no clear target or no clear action.",
@@ -217,17 +218,17 @@ function analyzePromptcraft(playerPrompt: string, enemy: string) {
   const length = playerPrompt.length;
   const role = /^\s*(you are|act as|as a)\b/i.test(playerPrompt);
   const clarity = /\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/.test(prompt);
-  const target = prompt.includes(enemy.toLowerCase()) || /\b(goblin|enemy|target|foe)\b/.test(prompt);
-  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry)\b/.test(prompt);
-  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell)\b/.test(prompt);
-  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic)\b/.test(prompt) || /\d/.test(prompt);
+  const target = prompt.includes(enemy.toLowerCase()) || /\b(goblin|oracle|enemy|target|foe|boss|hostile)\b/.test(prompt);
+  const action = /\b(attack|strike|throw|stab|slash|cast|hit|pin|interrupt|break|bind|expose|rewrite|clarify|identify|explain|turn|disable|stop|drain|weaken|pierce|cut|aim|target|defeat|fight|counter|block|parry|define|verify|validate|audit|question|challenge|test|prove)\b/.test(prompt);
+  const effect = /\b(lose health|loses health|loss of health|health|hp|damage|wound|weaken|weakened|disable|disabled|interrupt|interrupted|stop|stopped|prevent|break|broken|expose|exposed|defeat|defeated|drop|drain|counter|cannot retaliate|cannot counter|next attack|next spell|clarify|clarified|verify|verified|validate|validated|false premise|success criteria|truth|context)\b/.test(prompt);
+  const specificity = /\b(precise|specific|concrete|focused|exact|three|two|one|head|hand|casting hand|weak point|ward|spell|knife|knives|blade|slash|strike|next attack|next spell|where|how|method|tactic|context|assumption|assumptions|premise|criteria|success criteria|evidence|verification)\b/.test(prompt) || /\d/.test(prompt);
   const goal = /\b(goal|goals|outcome|objective|solve|defeat|clarify|diagnose|rewrite|explain|identify|make|force|turn)\b/.test(prompt) || effect;
   const constraints = /\b(must|avoid|only|never|do not|require|requires|required|requirement|requirements|constraint|constraints|criteria|criterion|include|exclude|limit|without)\b/.test(prompt);
   const structure = /\b(step|steps|first|then|finally|list|lists|listing|outline|sequence|plan|section|name|naming|give|giving|show|showing|finish|finishing)\b/.test(prompt);
   const context = /\b(context|assumption|assumptions|edge case|edge cases|ambiguity|ambiguous|missing|audience|purpose)\b/.test(prompt);
   const example = /\b(example|for example|sample|illustrate)\b/.test(prompt);
   const confirmation = /\b(confirm|confirms|confirmation|check|checks|checking|verify|verifies|verification|validate|validation|review|ensure|report|success criteria|worked|lands|landed|final)\b/.test(prompt);
-  const adaptation = /\b(regex goblin|ambiguity|ambiguous|pattern|parser|malformed|loophole|ward|casting hand|next spell|next attack|weak point|escape|unexpected token|parentheses|slash)\b/.test(prompt);
+  const adaptation = prompt.includes(enemy.toLowerCase()) || /\b(regex goblin|goblin|null oracle|oracle|ambiguity|ambiguous|pattern|parser|malformed|loophole|ward|casting hand|next spell|next attack|weak point|escape|unexpected token|parentheses|slash|context|assumption|assumptions|premise|false premise|success criteria|criteria|verification|verify|validate|missing context|prophecy|truth|evidence|uncertainty)\b/.test(prompt);
   const technical = /\b(regex|syntax|pattern|escape|literal|json|schema)\b/.test(prompt) || /[{}[\]()/\\^$*+?.|]/.test(playerPrompt);
   const vagueCount = (prompt.match(/\b(maybe|stuff|things|somehow|good|better|destroy)\b/g) ?? []).length;
   const combatIntent = [role, target, action, effect, specificity].filter(Boolean).length;
@@ -306,7 +307,7 @@ function chooseMissingFeatureImprovement(features: ReturnType<typeof analyzeProm
   if (!features.constraints && !features.confirmation) return "Fix this next: add a confirmation check or must/avoid constraint.";
   if (!features.confirmation) return "Fix this next: add a confirmation or success check.";
   if (!features.constraints) return "Fix this next: add a must/avoid/only constraint.";
-  if (!features.adaptation) return "Fix this next: connect the move to the goblin's weakness or next attack.";
+  if (!features.adaptation) return "Fix this next: connect the move to the enemy's weakness or next attack.";
   return "Refine further: name the exact weakness or risk the strike exploits.";
 }
 
@@ -329,8 +330,8 @@ function alignJudgeNarrative(result: JudgeResult, payload: JudgeRequest): JudgeR
       : result.reason,
     terminalText: contradictoryHit
       ? result.quality === "critical"
-        ? "The spell lands cleanly; green sigils bite into the Regex Goblin and its ward fractures."
-        : "The spell lands with force, cutting through the goblin's ward and drawing a clean wound."
+        ? `The spell lands cleanly; green sigils bite into ${payload.enemy}'s ward and fracture it.`
+        : `The spell lands with force, cutting through ${payload.enemy}'s ward and drawing a clean wound.`
       : result.terminalText,
     improvement: redundantNumberTip
       ? "Refine further: name the exact weakness or risk the strike exploits."
@@ -416,9 +417,9 @@ function fallbackJudge(payload: JudgeRequest): JudgeResult {
   }
   if (features.adaptation) {
     score += 10;
-    hits.push("the attack adapts to the goblin");
+    hits.push("the attack adapts to the enemy");
   } else {
-    misses.push("connect the move to the goblin's weakness or next attack");
+    misses.push("connect the move to the enemy's weakness or next attack");
   }
   const length = payload.playerPrompt.length;
   if (length >= 60 && length <= 360) {
@@ -466,9 +467,9 @@ function fallbackJudge(payload: JudgeRequest): JudgeResult {
     reason,
     terminalText:
       quality === "critical"
-        ? "Green fire closes every ambiguity and the goblin's loopholes collapse."
+        ? `Green fire exploits ${payload.enemy}'s flaw and fractures the ward.`
         : quality === "solid"
-          ? "The spell forms a clear path through the parser's fog."
+          ? `The spell forms a clear path through ${payload.enemy}'s fog.`
           : quality === "weak"
             ? "The spell sparks, but vague edges leave the ward intact."
             : "The incantation collapses into inert terminal noise.",

@@ -248,7 +248,14 @@ textarea { font: inherit; color: inherit; }
 
 .fig svg.sprite { width: 120px; height: 150px; image-rendering: pixelated; transition: filter 200ms ease, transform 200ms ease; animation: idleBob 2.4s ease-in-out infinite; }
 .fig.enemy svg.sprite { animation-duration: 2.8s; animation-delay: -0.6s; }
+.oracle-sprite .oracle-eye { animation: oracleEye 1.7s steps(2, end) infinite; }
+.oracle-sprite .oracle-omen { animation: oracleOmen 2.2s steps(2, end) infinite; }
+.oracle-sprite .omen-b { animation-delay: -0.45s; }
+.oracle-sprite .omen-c { animation-delay: -0.9s; }
+.oracle-sprite .omen-d { animation-delay: -1.35s; }
 @keyframes idleBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes oracleEye { 0%, 100% { opacity: 0.95; } 50% { opacity: 0.35; } }
+@keyframes oracleOmen { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.15; } }
 .fig.player.casting svg.sprite { animation: castShimmer 0.6s ease-out; filter: drop-shadow(0 0 14px var(--mage)); }
 .fig.enemy.hit svg.sprite { filter: brightness(2.4) saturate(0.4); animation: hitShake 240ms ease; }
 @keyframes hitShake { 0% { transform: translateX(0); } 25% { transform: translateX(8px); } 50% { transform: translateX(-4px); } 75% { transform: translateX(2px); } 100% { transform: translateX(0); } }
@@ -342,13 +349,15 @@ textarea { font: inherit; color: inherit; }
 }
 .spell-input textarea::placeholder { color: var(--dim); }
 .spell-input textarea:disabled { opacity: 0.55; }
-.spell-meta { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 10px; border-top: 1px solid var(--border); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
-.spell-meta .right { font-variant-numeric: tabular-nums; color: var(--dim); }
-.spell-meta .relic-chip { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; padding: 2px 7px; border: 1px solid var(--border-strong); color: var(--mute); }
+.spell-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px 10px; border-top: 1px solid var(--border); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
+.spell-meta-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.spell-meta .right { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--dim); }
+.spell-meta .relic-chips { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.spell-meta .relic-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 7px; border: 1px solid var(--border-strong); color: var(--mute); }
 .spell-meta .relic-chip .d { width: 6px; height: 6px; border: 1px solid var(--dim); }
 .spell-meta .relic-chip.on { color: var(--judge); border-color: var(--judge-line); background: var(--judge-soft); }
 .spell-meta .relic-chip.on .d { background: var(--judge); border-color: var(--judge); box-shadow: 0 0 6px var(--judge); }
-.spell-note { padding: 8px 14px 10px; border-top: 1px solid var(--border); font-size: 10.5px; letter-spacing: 0.04em; line-height: 1.5; }
+.spell-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; letter-spacing: 0; line-height: 1.5; text-transform: none; }
 .spell-note.borrowed { color: var(--enemy); }
 .spell-note.blanks { color: var(--judge); }
 
@@ -574,6 +583,6 @@ textarea { font: inherit; color: inherit; }
 
 /* reduced motion — gate looping animations */
 @media (prefers-reduced-motion: reduce) {
-  .motes span, .fig svg.sprite, .reticle.armed, .reticle.armed .r-cross, .cast-btn.pulse, .scene-hud .led, .fig.enemy .windup .dot, .bar-track.low,
+  .motes span, .fig svg.sprite, .oracle-sprite .oracle-eye, .oracle-sprite .oracle-omen, .reticle.armed, .reticle.armed .r-cross, .cast-btn.pulse, .scene-hud .led, .fig.enemy .windup .dot, .bar-track.low,
   .tour-spotlight, .tour-arrow { animation: none !important; }
 }

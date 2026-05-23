@@ -4,7 +4,7 @@
 
 **A retro terminal RPG where your prompt is the weapon.**
 
-You play a Prompt Mage dueling the Regex Goblin inside a dungeon parser. There are no attack buttons — you *write* spells. An LLM judge (the **Arbiter**) scores how good your prompt is, and that score becomes your damage.
+You play a Prompt Mage dueling hostile prompt failures inside a dungeon parser. There are no attack buttons — you *write* spells. An LLM judge (the **Arbiter**) scores how good your prompt is, and that score becomes your damage.
 
 **Live demo:** [prompt-caster.vercel.app](https://prompt-caster.vercel.app)
 
@@ -20,7 +20,7 @@ PromptCaster turns prompt engineering into a combat system. Each turn you compos
 
 The current judge is intentionally human-prompt friendly: a warrior, mage, commander, rogue, analyst, or prompt coach prompt can all score well if they clearly say who is acting, what they target, what they do, and what result they want. Regex/code syntax is optional flavor, not a requirement.
 
-It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** interface: tight borders, mono type, a live combat "viewport," and restrained mint/coral/amber accents. The prompt is the weapon, the arena is the scope, the judge is the trigger.
+It's a focused two-boss gauntlet built as a serious **CLI/IDE-flavored** interface: tight borders, mono type, a live combat "viewport," and restrained mint/coral/amber accents. The prompt is the weapon, the arena is the scope, the judge is the trigger.
 
 ![Mid-battle](docs/screenshots/gameplay.png)
 
@@ -28,11 +28,18 @@ It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** 
 
 ## How to play
 
-1. **Write a spell** in the composer. Aim at the Regex Goblin's weakness: role, target, tactic, and result. Add constraints or confirmation for a harder hit.
+1. **Write a spell** in the composer. Aim at the active enemy's weakness. Add constraints, context, sequence, or confirmation for a harder hit.
 2. **Watch the relics light up** as your prompt satisfies them (see below) — they're live feedback on prompt quality.
 3. **Cast** (button or `⌘/Ctrl + Enter`). The Arbiter scores your prompt; **damage scales with the score**.
 4. **Read the verdict.** The Arbiter tells you what landed and exactly what to improve next turn.
-5. **Survive.** After your cast, the goblin strikes back. Win by draining its HP before yours runs out.
+5. **Survive the gauntlet.** After your cast, the enemy strikes back. Beat Regex Goblin to reveal Null Oracle; your HP and tokens restore to full before the second boss.
+
+### Enemies
+
+| Boss | HP | Weakness | Attacks |
+|------|----|----------|---------|
+| Regex Goblin | 170 | role · target · tactic · result | Unexpected Token · Escaped Slash · Parentheses Trap |
+| Null Oracle | 190 | context · assumptions · success criteria · verification | Missing Context · False Premise · Ambiguous Prophecy |
 
 ### Relics — live prompt-quality indicators
 
@@ -40,7 +47,7 @@ It's a single, self-contained encounter built as a serious **CLI/IDE-flavored** 
 |------|-------|----------------------------|
 | `SYS` | System Prompt Crown | opens with **"You are…"** |
 | `CLR` | Clarity Gem | uses **clear / concrete / tactical / checkable** spellcraft language |
-| `CTX` | Context Blade | names the **Regex Goblin** or goblin directly |
+| `CTX` | Context Blade | names the active enemy directly |
 
 ---
 
@@ -80,9 +87,9 @@ The Arbiter returns a sharp, in-character critique:
 
 The whole point is *writing* good prompts, so several systems make shortcuts worthless:
 
-- **Skeleton templates, not answers.** The three template buttons load a *shape* full of `[blanks]` (`You are [your fighter or caster role]. Attack [name the enemy]…`). A prompt containing any unfilled `[blank]` **cannot be cast** — you have to write the substance yourself.
+- **Skeleton templates, not answers.** The three template buttons load a *shape* full of `[blanks]` (`You are [your fighter or caster role]. Attack [name the enemy]…`). A prompt containing any unfilled `[blank]` **cannot be cast** — the inline warning sits beside the `SYS / CLR / CTX` chips until you write the substance yourself.
 - **Borrowed words deal 0 damage.** Pasted text (or a template left verbatim) is flagged and lands for nothing until you rewrite it in your own words.
-- **The goblin adapts.** It remembers your last few casts; reusing the same pattern is **resisted** (damage falls off), so you must keep your prompts varied.
+- **The enemy adapts.** It remembers your last few casts within the current fight; reusing the same pattern is **resisted** (damage falls off), so you must keep your prompts varied. Pattern memory clears between bosses.
 - **Tokens are a resource.** Every cast costs tokens scaled to prompt length, with a small per-turn regen — rambling drains you, concision is rewarded.
 
 <table>
@@ -92,7 +99,7 @@ The whole point is *writing* good prompts, so several systems make shortcuts wor
 </tr>
 <tr>
 <td align="center"><em>The arena viewport — perspective floor, reticle, cast VFX.</em></td>
-<td align="center"><em>The composer — line gutter, live relic chips, token cost.</em></td>
+<td align="center"><em>The composer — line gutter, live relic chips, inline warnings, token cost.</em></td>
 </tr>
 </table>
 
@@ -135,6 +142,15 @@ npm run build
 npm run preview
 ```
 
+Second-boss test shortcut:
+
+```text
+http://localhost:5173?boss=null-oracle
+http://localhost:5173?boss=2
+```
+
+That starts directly on Null Oracle with full HP/tokens and logs a test override. `?enemy=null-oracle` and `?start=oracle` work too.
+
 `.env` keys:
 
 | Key | Purpose | Default |
@@ -163,4 +179,4 @@ docs/screenshots/   # README imagery
 
 ## Design notes
 
-A single-encounter prototype, deliberately scoped: one enemy, no inventory/maps/accounts. The intent is to make the **first ten seconds self-explanatory** and every cast feel consequential — a debugger attached to a dungeon, not a cartoon mage. The visual system (arena viewport, reticle, beam/impact VFX, relic LEDs) all exists to show *what your prompt did* to a hostile parser.
+A two-boss prototype, deliberately scoped: Regex Goblin into Null Oracle, no inventory/maps/accounts. The intent is to make the **first ten seconds self-explanatory** and every cast feel consequential — a debugger attached to a dungeon, not a cartoon mage. The visual system (arena viewport, reticle, beam/impact VFX, relic LEDs) all exists to show *what your prompt did* to a hostile prompt failure.

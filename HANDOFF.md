@@ -1,9 +1,9 @@
 # PROMPTCASTER — Handoff (Claude → Codex)
 
-A single-encounter browser RPG where the player's **prompt is the weapon**. A Prompt Mage
-duels the Regex Goblin; an LLM "Arbiter" scores each prompt and **damage scales with the
-score**. This document is the current source of truth — it supersedes the original
-pre-redesign handoff.
+A two-boss browser RPG where the player's **prompt is the weapon**. A Prompt Mage first
+duels the Regex Goblin, then the Null Oracle; an LLM "Arbiter" scores each prompt and
+**damage scales with the score**. This document is the current source of truth — it
+supersedes the original pre-redesign handoff.
 
 Live demo: https://prompt-caster.vercel.app
 
@@ -53,7 +53,8 @@ PLAYER_MAX_HP   = 90
 PLAYER_MAX_TOKENS = 60      // regen +8 each surviving turn
 TOKEN_REGEN     = 8
 MAX_HIT         = 44
-ENEMY.maxHp     = 170
+ENEMIES[0].maxHp = 170     // Regex Goblin
+ENEMIES[1].maxHp = 190     // Null Oracle
 PATTERN_MEMORY  = 3
 BLANK_PATTERN   = /\[[^\]]+\]/
 ```
@@ -62,11 +63,21 @@ BLANK_PATTERN   = /\[[^\]]+\]/
   The judge's own `damage` field is ignored client-side so balance stays predictable and
   tied directly to the score.
 - **Token cost:** `clamp(ceil(prompt.trim().length / 16), 6, 26)` — concise prompts cost less.
-- **Enemy attacks** cycle by turn: `attacks[(turn-1) % 3]` →
-  Unexpected Token (13) · Escaped Slash (11) · Parentheses Trap (15). The next one is shown
-  as a dashed "NEXT … −N HP" telegraph in the enemy stat card.
+- **Enemies** live in the `ENEMIES` array:
+  - Regex Goblin: weakness `role · target · tactic · result`; attacks Unexpected Token (13),
+    Escaped Slash (11), Parentheses Trap (15).
+  - Null Oracle: weakness `context · assumptions · success criteria · verification`; attacks
+    Missing Context (14), False Premise (16), Ambiguous Prophecy (18).
+- **Enemy attacks** cycle by turn: `enemy.attacks[(turn-1) % enemy.attacks.length]`. The next
+  one is shown as a dashed "NEXT … −N HP" telegraph in the enemy stat card.
 - **Turn order:** player casts → damage applies → if enemy alive, it retaliates, then tokens
   regen +8 and `turn++`. A kill skips the retaliation.
+- **Boss progression:** killing Regex Goblin sets `phase='revealing'`, logs the deeper signal,
+  switches to Null Oracle after a short delay, clears prompt/repetition memory, and restores
+  HP/tokens to `PLAYER_MAX_HP` / `PLAYER_MAX_TOKENS`. Killing Null Oracle sets `phase='won'`.
+- **Test bypass:** `getRequestedEnemyIndex()` reads `?boss=2`, `?boss=null-oracle`,
+  `?enemy=null-oracle`, or `?start=oracle` and initializes directly on Null Oracle with full
+  HP/tokens plus a "TEST OVERRIDE" log. `reset()` preserves the requested starting boss.
 
 ### Anti-abuse (the core of the design — keep all of it)
 
@@ -79,7 +90,8 @@ The whole point is *writing* prompts, so shortcuts are neutralized:
    while a recorded chunk still appears verbatim in the prompt, `borrowed` is true and the
    cast is **REJECTED** for 0 damage. Editing the text (so the chunk no longer matches)
    clears it. Loading a template does **not** mark borrowed (blanks gate it instead).
-3. **Pattern resistance.** The goblin remembers the last `PATTERN_MEMORY` casts (word sets).
+3. **Pattern resistance.** The enemy remembers the last `PATTERN_MEMORY` casts (word sets)
+   for the current fight only. Memory is cleared when Null Oracle is revealed.
    `patternResistance()` takes the max Jaccard similarity vs that history; multiplier =
    `sim≥.85→.2, ≥.65→.45, ≥.5→.7, else 1`. Repeats/near-repeats are heavily reduced and a
    `RESISTED` warning is logged. Cycling distinct prompts avoids it.
@@ -91,7 +103,7 @@ The whole point is *writing* prompts, so shortcuts are neutralized:
 |------|----------------------|------|
 | SYS | opens with "you are…" | `/^\s*you are\b/i` |
 | CLR | uses clear/concrete/tactical/checkable spellcraft language | `/\b(clear|concrete|precise|concise|specific|structured|focused|tactical|disciplined|verify|verification|confirm|checkable)\b/i` |
-| CTX | names the enemy | includes `"regex goblin"` or `"goblin"` |
+| CTX | names the active enemy | Regex Goblin accepts `"regex goblin"`/`"goblin"`; Null Oracle accepts `"null oracle"`/`"oracle"` |
 
 Shown both as live chips in the composer footer and as the bottom-row **Relics** panel.
 
@@ -121,6 +133,15 @@ t=1280   else enemy attack: playerHp-=dmg; floater; log 'enemy'; turn++; regen; 
   "playerPrompt": "..." }
 ```
 
+The same contract is used for Null Oracle:
+
+```json
+{ "enemy": "Null Oracle",
+  "weakness": "context · assumptions · success criteria · verification",
+  "relics": ["System Prompt Crown","Clarity Gem","Context Blade"],
+  "playerPrompt": "..." }
+```
+
 No combat history is ever sent. Returns JSON with these keys:
 
 ```json
@@ -131,10 +152,12 @@ No combat history is ever sent. Returns JSON with these keys:
 ```
 
 - `server.ts` `SYSTEM_PROMPT` casts the judge as **"THE ARBITER"** — a constructive combat
-  coach and master prompt-engineer. The rubric now evaluates two layers: combat intent
+  coach and master prompt-engineer. The rubric evaluates two layers: combat intent
   (role/persona, target, action, intended effect, specificity) and reliability upgrades
-  (constraints, sequence, context/examples, confirmation, enemy adaptation). Regex/code
-  symbols are optional flavor only and should not be over-rewarded.
+  (constraints, sequence, context/examples, confirmation, enemy adaptation). Regex Goblin
+  tests ambiguity/malformed intent; Null Oracle tests missing context, assumptions, false
+  premises, success criteria, and verification. Regex/code symbols are optional flavor only
+  and should not be over-rewarded.
   `temperature: 0.3`, `max_tokens: 180`, `response_format: json_object`, score bands,
   recognition rules, and hard caps anchor the tone.
 - Current scoring is deliberately **human-prompt adapted**. Fantasy/combat prompts such as
@@ -146,7 +169,9 @@ No combat history is ever sent. Returns JSON with these keys:
 - `applyPromptcraftBounds()` is the server-side safety layer after the LLM response. It caps
   missing target/action, missing intended effect, no specificity, no confirmation/constraint,
   no enemy adaptation, very short prompts, vague prompts, and code/regex-only prompts. It also
-  boosts good human intent to solid/critical floors when the prompt earns them.
+  boosts good human intent to solid/critical floors when the prompt earns them. It now
+  recognizes both combat verbs and analytical verbs such as audit, verify, validate,
+  challenge, test, and prove.
 - `alignJudgeNarrative()` prevents confusing verdicts: if the final score is solid/critical,
   terminal text containing miss/fail/fizzle/dodge/evade/unbound-style wording is replaced
   with a clean hit line. It also removes some redundant "add a number" advice when the player
@@ -183,15 +208,19 @@ the large centerpiece.
 
 **Composer containment (do not regress):** `.spell-input` wraps gutter + textarea with
 `overflow:hidden`; the textarea is `min-height:0` so it shrinks to its box and scrolls
-internally instead of overlapping the `SYS/CLR/CTX` footer. `.spell-area` has a min-height
-floor so the CAST button never spills past the panel border on shorter windows. The line-
-number gutter is decorative (does not scroll with content).
+internally instead of overlapping the `SYS/CLR/CTX` footer. Blank/paste warnings render as
+inline `.spell-note` text inside `.spell-meta-left` beside the relic chips, not as a
+separate row, so the textarea keeps its vertical space. `.spell-area` has a min-height floor
+so the CAST button never spills past the panel border on shorter windows. The line-number
+gutter is decorative (does not scroll with content).
 
 **Key components in `src/main.tsx`:** `Stats`/`Bar`, `ArenaPanel` (perspective floor, drifting
 motes, scanline, viewfinder brackets, scene HUD, figure tags w/ mini-HP, spinning **reticle**
 when armed, **windup** telegraph, staggered **cast-fx** orb→beam→impact→sparks, floaters),
-`ComposerPanel` (gutter, live relic chips, token cost, skeleton templates, cast-row),
-`VerdictPanel`, `RelicsPanel`, `MageSprite`/`GoblinSprite` (SVG, `crispEdges`).
+`ComposerPanel` (gutter, live relic chips, inline warning state, token cost, skeleton templates, cast-row),
+`VerdictPanel`, `RelicsPanel`, `MageSprite`, `GoblinSprite`, `NullOracleSprite` (SVG,
+`crispEdges`). `EnemySprite` chooses the active enemy sprite; Null Oracle has a separate
+pixel body plus flickering eye/omen animation.
 
 ---
 
@@ -213,7 +242,8 @@ Dependency-free guided walkthrough (`OnboardingTour` + `TOUR_STEPS` in `src/main
 
 ## 7 · Constraints to preserve
 
-- Single-page; **one enemy** (Regex Goblin); no inventory/maps/accounts/multiplayer.
+- Single-page; **two-enemy gauntlet only** (Regex Goblin → Null Oracle); no
+  inventory/maps/accounts/multiplayer.
 - API key **server-only**; never send combat history to the LLM; keep compact JSON-only
   output; keep the local fallback and the cache.
 - Keep all four anti-abuse systems (skeletons, borrowed=0, resistance, tokens).
@@ -223,10 +253,10 @@ Dependency-free guided walkthrough (`OnboardingTour` + `TOUR_STEPS` in `src/main
 
 ## 8 · Notes for next steps
 
-- **Balance** (per the owner, currently frozen): a live playtest had a skilled player win in
-  ~5 casts (target was 6–9). If asked to extend the fight: bump `ENEMY.maxHp` toward ~210
-  and/or lower `TOKEN_REGEN` to make tokens bite. The damage curve and attack values felt
-  good as-is.
+- **Balance:** Regex Goblin is the opener at 170 HP. Null Oracle is slightly heavier at 190
+  HP, but the player enters it fully restored. If asked to lengthen the gauntlet, adjust
+  `ENEMIES[*].maxHp`, attack damage, and/or `TOKEN_REGEN`; keep the full restore between
+  bosses unless explicitly asked otherwise.
 - **Verifying UI changes without a browser in the loop:** there's a headless-Chrome +
   Pillow workflow used heavily during the redesign — render the running app and crop
   regions to actually *see* layout instead of guessing:
@@ -248,4 +278,11 @@ curl -s http://localhost:5173/api/judge-status
 curl -s -X POST http://localhost:5173/api/judge-prompt \
   -H 'Content-Type: application/json' \
   -d '{"enemy":"Regex Goblin","weakness":"role · target · tactic · result","relics":["System Prompt Crown","Clarity Gem","Context Blade"],"playerPrompt":"You are an old war fighter. Throw three precise knives at the Regex Goblin casting hand, interrupt its spell, and confirm it loses health."}' | python3 -m json.tool
+
+curl -s -X POST http://localhost:5173/api/judge-prompt \
+  -H 'Content-Type: application/json' \
+  -d '{"enemy":"Null Oracle","weakness":"context · assumptions · success criteria · verification","relics":["System Prompt Crown","Clarity Gem","Context Blade"],"playerPrompt":"You are a truth auditor. Give the Null Oracle clear context, state the assumptions, expose the false premise, verify the success criteria, and confirm its ward loses health."}' | python3 -m json.tool
+
+# Browser shortcut for testing the second boss directly:
+# http://localhost:5173?boss=null-oracle
 ```
