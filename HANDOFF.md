@@ -5,6 +5,8 @@ duels the Regex Goblin; an LLM "Arbiter" scores each prompt and **damage scales 
 score**. This document is the current source of truth — it supersedes the original
 pre-redesign handoff.
 
+Live demo: https://prompt-caster.vercel.app
+
 ---
 
 ## 1 · Stack & run
@@ -13,6 +15,7 @@ pre-redesign handoff.
   libs). JetBrains Mono everywhere (loaded in `index.html`).
 - **Backend:** Express (`server.ts`) — judge endpoints + LLM call + local fallback + cache.
 - **Build/dev:** Vite.
+- **Hosted demo:** `https://prompt-caster.vercel.app`
 
 ```bash
 npm install
@@ -36,7 +39,7 @@ npm run preview   # tsx server.ts --prod  (serves dist/)
 | `src/styles.css` | Full design system: tokens, layout, arena VFX, animations, the desktop fit-to-viewport rules, tour styles. |
 | `server.ts` | `/api/judge-status`, `/api/judge-prompt`, the Arbiter system prompt, the LLM call, server-side normalize + local fallback, cache. |
 | `index.html` | Entry; loads JetBrains Mono. |
-| `.env` (git-ignored) / `.env.example` | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`. Key is **server-only**. |
+| `.env` (git-ignored) / `.env.example` | `AI_API_KEY`, optional compatibility `VITE_AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`. Key is **server-only**. |
 | `docs/screenshots/` | README imagery. |
 
 ---
@@ -70,7 +73,7 @@ BLANK_PATTERN   = /\[[^\]]+\]/
 The whole point is *writing* prompts, so shortcuts are neutralized:
 
 1. **Skeleton templates.** The 3 template buttons load a *shape* full of `[blanks]`
-   (`You are [your caster role]. Target [name the enemy]…`). `canCast` is false while any
+   (`You are [your fighter or caster role]. Attack [name the enemy]…`). `canCast` is false while any
    `BLANK_PATTERN` match remains; there is also a hard guard in `cast()`.
 2. **Borrowed = 0 damage.** Clipboard paste (≥8 chars) is recorded in `borrowedChunksRef`;
    while a recorded chunk still appears verbatim in the prompt, `borrowed` is true and the
@@ -134,14 +137,27 @@ No combat history is ever sent. Returns JSON with these keys:
   symbols are optional flavor only and should not be over-rewarded.
   `temperature: 0.3`, `max_tokens: 180`, `response_format: json_object`, score bands,
   recognition rules, and hard caps anchor the tone.
+- Current scoring is deliberately **human-prompt adapted**. Fantasy/combat prompts such as
+  warrior, mage, rogue, commander, analyst, or coach can score well when they contain a
+  clear role, target, action, intended effect, and at least one tactical/reliability detail.
+  Formal prompt-engineering language is helpful but not required.
 - Both server and client **normalize/clamp** the result (reason ≤180, terminalText ≤140,
   improvement ≤140). Client recomputes `damage = damageFromScore(score)`.
+- `applyPromptcraftBounds()` is the server-side safety layer after the LLM response. It caps
+  missing target/action, missing intended effect, no specificity, no confirmation/constraint,
+  no enemy adaptation, very short prompts, vague prompts, and code/regex-only prompts. It also
+  boosts good human intent to solid/critical floors when the prompt earns them.
+- `alignJudgeNarrative()` prevents confusing verdicts: if the final score is solid/critical,
+  terminal text containing miss/fail/fizzle/dodge/evade/unbound-style wording is replaced
+  with a clean hit line. It also removes some redundant "add a number" advice when the player
+  already gave a number.
 - **Cache** keyed by `enemy + prompt` (server `cache` Map + client `cacheRef`); repeats
   return `source:"cache"`.
 - **Fallback:** if the provider fails or no key is set, a deterministic local scorer runs
   (role, target, action, intended effect, specificity, constraints, structure, context,
   examples, confirmation, enemy adaptation, length, and small optional technical-detail
-  bonus), so the game always plays.
+  bonus), then uses the same broad caps/floors so offline scoring stays aligned with the LLM
+  path. Human prompts can land solid/critical; regex-symbol-only prompts stay weak/misfire.
   Top-bar pill shows `LLM JUDGE` vs `LOCAL JUDGE`.
 - The verdict (quality · score, `reason`, and `▸ TO IMPROVE: improvement`) renders in the
   bottom-row **ARBITER · VERDICT** panel; `RESISTED`/`REJECTED` states are reflected there.
