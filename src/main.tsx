@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 type Quality = "misfire" | "weak" | "solid" | "critical";
-type Phase = "playing" | "casting" | "revealing" | "won" | "lost";
+type Phase = "playing" | "casting" | "rewarding" | "revealing" | "won" | "lost";
 type Tone = "system" | "player" | "result" | "enemy" | "warning";
 
 type JudgeResult = {
@@ -23,6 +23,25 @@ type LogEntry = { id: number; ts: number; tone: Tone; text: string };
 type Floater = { id: number; target: "enemy" | "player"; text: string; quality: Quality | "enemy" };
 type JudgeStatus = { mode: "llm" | "fallback"; model: string; baseUrl: string | null };
 type Vars = React.CSSProperties & Record<`--${string}`, string | number>;
+type RunStats = {
+  score: number;
+  combo: number;
+  bestCombo: number;
+  casts: number;
+  criticals: number;
+  solids: number;
+  resisted: number;
+  rejected: number;
+  bestHit: number;
+  bossesDefeated: number;
+  clearBonus: number;
+};
+type RankInfo = { label: string; title: string; nextAt: number | null; nextLabel: string | null };
+type ScoreEvent = { gain: number; combo: number; detail: string };
+type RewardId = "token-siphon" | "combo-lens" | "ward-script";
+type Reward = { id: RewardId; sigil: string; name: string; summary: string; detail: string };
+type MedalId = "first-critical" | "full-sigil" | "combo-chain" | "heavy-hit" | "clean-gauntlet";
+type Medal = { id: MedalId; sigil: string; name: string; detail: string; score: number };
 type Enemy = {
   id: "regex-goblin" | "null-oracle";
   name: string;
@@ -47,6 +66,57 @@ const TOKEN_REGEN = 8;
 const MAX_HIT = 44;
 const PATTERN_MEMORY = 3;
 const BLANK_PATTERN = /\[[^\]]+\]/;
+const INITIAL_RUN_STATS: RunStats = {
+  score: 0,
+  combo: 0,
+  bestCombo: 0,
+  casts: 0,
+  criticals: 0,
+  solids: 0,
+  resisted: 0,
+  rejected: 0,
+  bestHit: 0,
+  bossesDefeated: 0,
+  clearBonus: 0
+};
+const RANKS = [
+  { label: "S", title: "Archmage", min: 6500 },
+  { label: "A", title: "Spellblade", min: 4700 },
+  { label: "B", title: "Invoker", min: 3200 },
+  { label: "C", title: "Apprentice", min: 1800 },
+  { label: "D", title: "Unbound", min: 0 }
+];
+const REWARDS: Reward[] = [
+  {
+    id: "token-siphon",
+    sigil: "SIP",
+    name: "Token Siphon",
+    summary: "solid or critical casts refund 6 tokens",
+    detail: "Rewards clean prompt economy. Strong casts keep the terminal charged for longer duels."
+  },
+  {
+    id: "combo-lens",
+    sigil: "LNS",
+    name: "Combo Lens",
+    summary: "all 3 relics add +1 combo and +60 score",
+    detail: "Turns complete prompt structure into momentum. Best for rank chasing."
+  },
+  {
+    id: "ward-script",
+    sigil: "WRD",
+    name: "Ward Script",
+    summary: "enemy attacks deal 4 less damage",
+    detail: "A defensive patch for riskier second-boss attempts."
+  }
+];
+const MEDALS: Medal[] = [
+  { id: "first-critical", sigil: "CRT", name: "Critical Thesis", detail: "land a clean critical cast", score: 140 },
+  { id: "full-sigil", sigil: "ALL", name: "Full Sigil", detail: "charge SYS, CLR, and CTX on one cast", score: 120 },
+  { id: "combo-chain", sigil: "CHN", name: "Chain Caster", detail: "reach combo x3", score: 160 },
+  { id: "heavy-hit", sigil: "HIT", name: "Heavy Impact", detail: "deal at least 36 damage in one cast", score: 130 },
+  { id: "clean-gauntlet", sigil: "CLN", name: "Clean Gauntlet", detail: "finish with no resisted or rejected casts", score: 300 }
+];
+const MEDAL_MAP = new Map(MEDALS.map((medal) => [medal.id, medal]));
 
 const ENEMIES: Enemy[] = [
   {
@@ -115,6 +185,75 @@ const TOUR_STEPS: TourStep[] = [
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const damageFromScore = (score: number) => Math.max(3, Math.round((score / 100) * MAX_HIT));
 const formatTurn = (n: number) => String(n).padStart(2, "0");
+
+function rankForScore(score: number): RankInfo {
+  const current = RANKS.find((rank) => score >= rank.min) ?? RANKS[RANKS.length - 1];
+  const next = [...RANKS].reverse().find((rank) => rank.min > score) ?? null;
+  return { label: current.label, title: current.title, nextAt: next?.min ?? null, nextLabel: next?.label ?? null };
+}
+
+function comboAfterCast(combo: number, quality: Quality, resisted: boolean, rejected: boolean) {
+  if (rejected) return 0;
+  if (resisted) return Math.max(0, combo - 1);
+  if (quality === "critical") return combo + 2;
+  if (quality === "solid") return combo + 1;
+  if (quality === "weak") return Math.max(0, combo - 1);
+  return 0;
+}
+
+function hasReward(rewardIds: RewardId[], id: RewardId) {
+  return rewardIds.includes(id);
+}
+
+function isCleanStrongCast(judgment: JudgeResult, resisted: boolean, rejected: boolean) {
+  return !resisted && !rejected && (judgment.quality === "solid" || judgment.quality === "critical");
+}
+
+function comboLensBonus(rewardIds: RewardId[], judgment: JudgeResult, relicsOn: number, resisted: boolean, rejected: boolean) {
+  return hasReward(rewardIds, "combo-lens") && relicsOn === 3 && isCleanStrongCast(judgment, resisted, rejected) ? 1 : 0;
+}
+
+function tokenRefundForCast(rewardIds: RewardId[], judgment: JudgeResult, resisted: boolean, rejected: boolean) {
+  return hasReward(rewardIds, "token-siphon") && isCleanStrongCast(judgment, resisted, rejected) ? 6 : 0;
+}
+
+function medalsForCast(args: {
+  judgment: JudgeResult;
+  relicsOn: number;
+  combo: number;
+  effectiveDamage: number;
+  resisted: boolean;
+  rejected: boolean;
+  finalKill: boolean;
+  cleanSoFar: boolean;
+}): MedalId[] {
+  const medals: MedalId[] = [];
+  if (args.judgment.quality === "critical" && isCleanStrongCast(args.judgment, args.resisted, args.rejected)) medals.push("first-critical");
+  if (args.relicsOn === 3 && !args.rejected) medals.push("full-sigil");
+  if (args.combo >= 3) medals.push("combo-chain");
+  if (args.effectiveDamage >= 36 && !args.resisted && !args.rejected) medals.push("heavy-hit");
+  if (args.finalKill && args.cleanSoFar) medals.push("clean-gauntlet");
+  return medals;
+}
+
+function castScoreGain(judgment: JudgeResult, effectiveDamage: number, relicsOn: number, combo: number, resisted: boolean, rejected: boolean) {
+  if (rejected) return { gain: 0, detail: "borrowed spell rejected" };
+  const qualityBonus = judgment.quality === "critical" ? 120 : judgment.quality === "solid" ? 55 : judgment.quality === "weak" ? 10 : 0;
+  const relicBonus = relicsOn * 35;
+  const comboBonus = combo > 1 ? combo * 30 : 0;
+  const rawGain = judgment.score * 3 + effectiveDamage * 8 + relicBonus + qualityBonus + comboBonus;
+  const gain = resisted ? Math.max(effectiveDamage * 8, Math.round(rawGain * 0.45)) : Math.round(rawGain);
+  const detail = resisted ? "pattern resisted" : `${relicsOn}/3 relics · ${judgment.quality}`;
+  return { gain, detail };
+}
+
+function bossClearBonus(enemyIndex: number, combo: number) {
+  return 420 + enemyIndex * 180 + combo * 45;
+}
+
+function finalClearBonus(playerHp: number, tokens: number, combo: number) {
+  return playerHp * 8 + tokens * 5 + combo * 75;
+}
 
 function getRequestedEnemyIndex() {
   if (typeof window === "undefined") return 0;
@@ -350,6 +489,11 @@ function App() {
   const [turn, setTurn] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>(() => initialLogs.map((l, i) => ({ ...l, id: i + 1 })));
   const [lastJudge, setLastJudge] = useState<JudgeResult | null>(null);
+  const [runStats, setRunStats] = useState<RunStats>(INITIAL_RUN_STATS);
+  const [lastScoreEvent, setLastScoreEvent] = useState<ScoreEvent | null>(null);
+  const [rewardIds, setRewardIds] = useState<RewardId[]>([]);
+  const [unlockedMedals, setUnlockedMedals] = useState<MedalId[]>([]);
+  const [pendingEnemyIndex, setPendingEnemyIndex] = useState<number | null>(null);
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const [beam, setBeam] = useState<number | false>(false);
   const [hit, setHit] = useState(false);
@@ -359,6 +503,9 @@ function App() {
   const [tourOpen, setTourOpen] = useState(false);
   const enemy = ENEMIES[enemyIndex];
   const finalEnemy = enemyIndex === ENEMIES.length - 1;
+  const rank = useMemo(() => rankForScore(runStats.score), [runStats.score]);
+  const activeRewards = useMemo(() => REWARDS.filter((reward) => rewardIds.includes(reward.id)), [rewardIds]);
+  const activeMedals = useMemo(() => MEDALS.filter((medal) => unlockedMedals.includes(medal.id)), [unlockedMedals]);
 
   // Auto-start the tour on first visit; remember dismissal.
   useEffect(() => {
@@ -412,6 +559,35 @@ function App() {
     setFloaters((cur) => [...cur, { id, target, text, quality }]);
     window.setTimeout(() => setFloaters((cur) => cur.filter((f) => f.id !== id)), 1050);
   }
+  function chooseReward(reward: Reward) {
+    if (pendingEnemyIndex === null) return;
+    const nextBoss = ENEMIES[pendingEnemyIndex];
+    setRewardIds((cur) => (cur.includes(reward.id) ? cur : [...cur, reward.id]));
+    pushLog("system", `REWARD LOCKED — ${reward.name}: ${reward.summary}.`);
+    pushLog("warning", "DEEPER SIGNAL DETECTED.");
+    pushLog("warning", nextBoss.revealLog);
+    pushLog("system", "RESTORE — HP and tokens returned to full capacity.");
+    pushLog("system", `WEAKNESS — ${nextBoss.weakness}.`);
+    setPhase("revealing");
+    setPlayerHp(PLAYER_MAX_HP);
+    setTokens(PLAYER_MAX_TOKENS);
+    setTurn(1);
+    setPrompt("");
+    setLastJudge(null);
+    setLastScoreEvent(null);
+    setBorrowed(false);
+    borrowedChunksRef.current = [];
+    patternHistoryRef.current = [];
+    window.setTimeout(() => {
+      setEnemyIndex(pendingEnemyIndex);
+      setEnemyHp(nextBoss.maxHp);
+      setPendingEnemyIndex(null);
+      setHit(false);
+      setShake(false);
+      setFloaters([]);
+      setPhase("playing");
+    }, 650);
+  }
 
   // ---- prompt authorship tracking (anti-abuse) ----
   function recomputeBorrowed(value: string) {
@@ -452,9 +628,10 @@ function App() {
     const spell = prompt.trim();
     const cacheKey = `${enemy.name.toLowerCase()}::${spell.toLowerCase()}`;
     const borrowedCast = borrowed;
+    const tokensAfterCast = Math.max(0, tokens - promptCost);
 
     setPhase("casting");
-    setTokens((cur) => Math.max(0, cur - promptCost));
+    setTokens(tokensAfterCast);
     pushLog("player", `CAST [${promptCost}T] · ${spell.length > 64 ? spell.slice(0, 64) + "…" : spell}`);
 
     let judgment: JudgeResult;
@@ -490,13 +667,64 @@ function App() {
     const baseDamage = judgment.damage;
     const effectiveDamage = borrowedCast ? 0 : multiplier < 1 ? Math.max(1, Math.round(baseDamage * multiplier)) : baseDamage;
     const resisted = !borrowedCast && multiplier < 1;
+    const nextEnemy = Math.max(0, enemyHp - effectiveDamage);
+    const finalKill = finalEnemy && nextEnemy <= 0;
+    const cleanSoFar = runStats.resisted + runStats.rejected === 0 && !resisted && !borrowedCast;
     patternHistoryRef.current = [wordSet(spell), ...patternHistoryRef.current].slice(0, PATTERN_MEMORY);
+    const lensBonus = comboLensBonus(rewardIds, judgment, relicsOn, resisted, borrowedCast);
+    const tokenRefund = tokenRefundForCast(rewardIds, judgment, resisted, borrowedCast);
+    const rewardScoreBonus = lensBonus ? 60 : 0;
+    const nextCombo = comboAfterCast(runStats.combo, judgment.quality, resisted, borrowedCast) + lensBonus;
+    const baseScoreEvent = castScoreGain(judgment, effectiveDamage, relicsOn, nextCombo, resisted, borrowedCast);
+    const newMedals = medalsForCast({
+      judgment,
+      relicsOn,
+      combo: nextCombo,
+      effectiveDamage,
+      resisted,
+      rejected: borrowedCast,
+      finalKill,
+      cleanSoFar
+    }).filter((id) => !unlockedMedals.includes(id));
+    const medalScoreBonus = newMedals.reduce((sum, id) => sum + (MEDAL_MAP.get(id)?.score ?? 0), 0);
+    const rewardDetail =
+      lensBonus && tokenRefund ? " · lens +1 · siphon +6T"
+        : lensBonus ? " · lens +1"
+          : tokenRefund ? " · siphon +6T"
+            : "";
+    const medalDetail = medalScoreBonus ? ` · medal +${medalScoreBonus}` : "";
+    const scoreEvent = { gain: baseScoreEvent.gain + rewardScoreBonus + medalScoreBonus, combo: nextCombo, detail: `${baseScoreEvent.detail}${rewardDetail}${medalDetail}` };
+    setLastScoreEvent({ ...scoreEvent, combo: nextCombo });
+    if (newMedals.length) {
+      setUnlockedMedals((cur) => [...cur, ...newMedals.filter((id) => !cur.includes(id))]);
+      for (const id of newMedals) {
+        const medal = MEDAL_MAP.get(id);
+        if (medal) pushLog("system", `MEDAL UNLOCKED — ${medal.name} +${medal.score}: ${medal.detail}.`);
+      }
+    }
+    setRunStats((cur) => {
+      const combo = comboAfterCast(cur.combo, judgment.quality, resisted, borrowedCast) + lensBonus;
+      const { gain } = castScoreGain(judgment, effectiveDamage, relicsOn, combo, resisted, borrowedCast);
+      return {
+        score: cur.score + gain + rewardScoreBonus + medalScoreBonus,
+        combo,
+        bestCombo: Math.max(cur.bestCombo, combo),
+        casts: cur.casts + 1,
+        criticals: cur.criticals + (judgment.quality === "critical" && !resisted && !borrowedCast ? 1 : 0),
+        solids: cur.solids + (judgment.quality === "solid" && !resisted && !borrowedCast ? 1 : 0),
+        resisted: cur.resisted + (resisted ? 1 : 0),
+        rejected: cur.rejected + (borrowedCast ? 1 : 0),
+        bestHit: Math.max(cur.bestHit, effectiveDamage),
+        bossesDefeated: cur.bossesDefeated,
+        clearBonus: cur.clearBonus
+      };
+    });
+    if (tokenRefund) setTokens((cur) => Math.min(PLAYER_MAX_TOKENS, cur + tokenRefund));
 
     setLastJudge({ ...judgment, damage: effectiveDamage, baseDamage, resisted, rejected: borrowedCast });
     setBeam(Date.now());
     window.setTimeout(() => setBeam(false), 1100);
 
-    const nextEnemy = Math.max(0, enemyHp - effectiveDamage);
     window.setTimeout(() => {
       setEnemyHp(nextEnemy);
       setHit(true);
@@ -516,14 +744,25 @@ function App() {
     if (borrowedCast) {
       pushLog("result", `REJECTED · 0/100 — ${judgment.terminalText} (0 HP)`);
       pushLog("warning", "BORROWED INCANTATION — pasted or unedited template text deals no damage. Rewrite it in your own words.");
+      pushLog("system", `SCORE +${scoreEvent.gain} · combo x${nextCombo} · ${scoreEvent.detail}.`);
     } else {
       pushLog("result", `${judgment.quality.toUpperCase()} · ${judgment.score}/100 — ${judgment.terminalText} (–${effectiveDamage} HP)`);
+      pushLog("system", `SCORE +${scoreEvent.gain} · combo x${nextCombo} · ${scoreEvent.detail}.`);
       if (resisted) pushLog("warning", `RESISTED (${Math.round(similarity * 100)}% familiar) — base ${baseDamage} cut to ${effectiveDamage}. Vary your approach.`);
     }
 
     if (nextEnemy <= 0) {
       window.setTimeout(() => {
+        const clear = bossClearBonus(enemyIndex, nextCombo);
+        const survival = finalEnemy ? finalClearBonus(playerHp, tokensAfterCast, nextCombo) : 0;
+        setRunStats((cur) => ({
+          ...cur,
+          score: cur.score + clear + survival,
+          bossesDefeated: cur.bossesDefeated + 1,
+          clearBonus: cur.clearBonus + clear + survival
+        }));
         pushLog("system", enemy.defeatLog);
+        pushLog("system", `CLEAR BONUS +${clear + survival}${survival ? ` · survival ${survival}` : ""}.`);
         if (finalEnemy) {
           setPhase("won");
           pushLog("system", enemy.finalVictoryLog);
@@ -531,38 +770,22 @@ function App() {
         }
 
         const nextIndex = enemyIndex + 1;
-        const nextBoss = ENEMIES[nextIndex];
-        setPhase("revealing");
-        pushLog("warning", "DEEPER SIGNAL DETECTED.");
-        pushLog("warning", nextBoss.revealLog);
-        pushLog("system", "RESTORE — HP and tokens returned to full capacity.");
-        pushLog("system", `WEAKNESS — ${nextBoss.weakness}.`);
+        setPendingEnemyIndex(nextIndex);
+        setPhase("rewarding");
+        pushLog("system", "REWARD DRAFT — choose one upgrade before the next boss.");
         setPlayerHp(PLAYER_MAX_HP);
         setTokens(PLAYER_MAX_TOKENS);
-        setTurn(1);
-        setPrompt("");
-        setLastJudge(null);
-        setBorrowed(false);
-        borrowedChunksRef.current = [];
-        patternHistoryRef.current = [];
-        window.setTimeout(() => {
-          setEnemyIndex(nextIndex);
-          setEnemyHp(nextBoss.maxHp);
-          setHit(false);
-          setShake(false);
-          setFloaters([]);
-          setPhase("playing");
-        }, 650);
       }, 1200);
       return;
     }
 
     window.setTimeout(() => {
-      const dmg = intent.dmg;
+      const wardReduction = hasReward(rewardIds, "ward-script") ? 4 : 0;
+      const dmg = Math.max(1, intent.dmg - wardReduction);
       const nextP = Math.max(0, playerHp - dmg);
       setPlayerHp(nextP);
       addFloater("player", `-${dmg}`, "enemy");
-      pushLog("enemy", `${enemy.name} casts ${intent.label}. –${dmg} HP.`);
+      pushLog("enemy", `${enemy.name} casts ${intent.label}. –${dmg} HP${wardReduction ? " (ward -4)" : ""}.`);
       setTurn((n) => n + 1);
       if (nextP <= 0) {
         setPhase("lost");
@@ -583,6 +806,11 @@ function App() {
     setPhase("playing");
     setTurn(1);
     setLastJudge(null);
+    setLastScoreEvent(null);
+    setRunStats(INITIAL_RUN_STATS);
+    setRewardIds([]);
+    setUnlockedMedals([]);
+    setPendingEnemyIndex(null);
     setFloaters([]);
     setBeam(false);
     setHit(false);
@@ -620,12 +848,14 @@ function App() {
           <span className={`pill ${judgeStatus?.mode === "fallback" ? "judge-local" : "judge-llm"}`}>
             <span className="led" />{judgeStatus?.mode === "fallback" ? "local judge" : "llm judge"}
           </span>
+          <span className="pill score-pill"><span className="pill-k">score</span><span className="pill-v">{runStats.score}</span><span className="rank-chip">{rank.label}</span></span>
+          <span className={`pill combo-pill ${runStats.combo > 1 ? "hot" : ""}`}><span className="pill-k">combo</span><span className="pill-v">x{runStats.combo}</span></span>
           <span className="pill muted"><span className="pill-k">turn</span><span className="pill-v">{formatTurn(turn)}</span></span>
           <button className="pill pill-btn" onClick={() => setTourOpen(true)} title="Replay the tutorial">? tour</button>
         </div>
       </header>
 
-      <Stats enemy={enemy} playerHp={playerHp} tokens={tokens} enemyHp={enemyHp} intent={intent} hit={hit} casting={phase === "casting"} />
+      <Stats enemy={enemy} playerHp={playerHp} tokens={tokens} enemyHp={enemyHp} intent={intent} hit={hit} casting={phase === "casting"} rewards={activeRewards} />
 
       <section className="main">
         <ArenaPanel
@@ -640,7 +870,7 @@ function App() {
       </section>
 
       <section className="bottom">
-        <VerdictPanel judge={lastJudge} />
+        <VerdictPanel judge={lastJudge} scoreEvent={lastScoreEvent} relicState={relicState} />
         <RelicsPanel relicState={relicState} relicsOn={relicsOn} />
         <section className="panel log-panel">
           <div className="panel-header">
@@ -668,9 +898,35 @@ function App() {
                 ? "The gauntlet is silent. Every hostile prompt pattern is bound."
                 : "Your prompt stream went dark under hostile logic."}
             </div>
+            <div className="outcome-rank">
+              <span className="rank-letter">{rank.label}</span>
+              <span className="rank-title">{rank.title}</span>
+              <span className="rank-score">{runStats.score} score</span>
+            </div>
+            <div className="outcome-summary">
+              <span><b>{runStats.bestCombo}</b><small>best combo</small></span>
+              <span><b>{runStats.bestHit}</b><small>best hit</small></span>
+              <span><b>{runStats.casts}</b><small>casts</small></span>
+              <span><b>{runStats.criticals}</b><small>critical</small></span>
+              <span><b>{runStats.clearBonus}</b><small>clear bonus</small></span>
+              <span><b>{activeMedals.length}</b><small>medals</small></span>
+            </div>
+            <div className="outcome-medals">
+              {activeMedals.length ? activeMedals.map((medal) => (
+                <span key={medal.id}><b>{medal.sigil}</b>{medal.name}</span>
+              )) : <span><b>---</b>no medals unlocked</span>}
+            </div>
+            <div className="outcome-penalty">{runStats.resisted + runStats.rejected} resisted/rejected casts</div>
+            <div className="rank-next">
+              {rank.nextAt ? `${rank.nextAt - runStats.score} score to rank ${rank.nextLabel}` : "top rank reached"}
+            </div>
             <button className="restart" onClick={reset}>restart battle</button>
           </div>
         </div>
+      )}
+
+      {phase === "rewarding" && (
+        <RewardDraft rewards={REWARDS.filter((reward) => !rewardIds.includes(reward.id))} onChoose={chooseReward} />
       )}
 
       <OnboardingTour steps={TOUR_STEPS} open={tourOpen} onClose={closeTour} />
@@ -678,9 +934,34 @@ function App() {
   );
 }
 
+// ---------- reward draft ----------
+function RewardDraft({ rewards, onChoose }: { rewards: Reward[]; onChoose: (reward: Reward) => void }) {
+  return (
+    <div className="reward-overlay">
+      <section className="reward-card">
+        <div className="reward-kicker">parser gate cleared</div>
+        <h2>Choose a relic upgrade</h2>
+        <p>One boon carries into the next boss. Pick the line that matches how you want to play the Null Oracle fight.</p>
+        <div className="reward-options">
+          {rewards.map((reward) => (
+            <button key={reward.id} type="button" className="reward-option" onClick={() => onChoose(reward)}>
+              <span className="reward-sigil">{reward.sigil}</span>
+              <span className="reward-copy">
+                <span className="reward-name">{reward.name}</span>
+                <span className="reward-summary">{reward.summary}</span>
+                <span className="reward-detail">{reward.detail}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ---------- stats ----------
-function Stats({ enemy, playerHp, tokens, enemyHp, intent, hit, casting }: {
-  enemy: Enemy; playerHp: number; tokens: number; enemyHp: number; intent: { label: string; dmg: number }; hit: boolean; casting: boolean;
+function Stats({ enemy, playerHp, tokens, enemyHp, intent, hit, casting, rewards }: {
+  enemy: Enemy; playerHp: number; tokens: number; enemyHp: number; intent: { label: string; dmg: number }; hit: boolean; casting: boolean; rewards: Reward[];
 }) {
   return (
     <section className="stats">
@@ -689,6 +970,11 @@ function Stats({ enemy, playerHp, tokens, enemyHp, intent, hit, casting }: {
         <div className="combatant-meta">
           <h2 className="combatant-name">Prompt Mage<span className="tag">ally</span></h2>
           <div className="combatant-role">relic-bound caster</div>
+          {rewards.length > 0 && (
+            <div className="reward-badges">
+              {rewards.map((reward) => <span key={reward.id} className="reward-badge">{reward.sigil}</span>)}
+            </div>
+          )}
           <div className="bars">
             <Bar label="hp" value={playerHp} max={PLAYER_MAX_HP} kind="hp" />
             <Bar label="tok" value={tokens} max={PLAYER_MAX_TOKENS} kind="tokens" />
@@ -742,7 +1028,7 @@ function ArenaPanel({ enemy, encounter, phase, playerHp, enemyHp, beam, hit, sha
   const armed = canCast && phase === "playing";
   const enemyHpPct = clamp((enemyHp / enemy.maxHp) * 100, 0, 100);
   const playerHpPct = clamp((playerHp / PLAYER_MAX_HP) * 100, 0, 100);
-  const status = phase === "playing" ? "ready" : phase === "casting" ? "casting…" : phase === "revealing" ? "revealing…" : phase;
+  const status = phase === "playing" ? "ready" : phase === "casting" ? "casting…" : phase === "rewarding" ? "reward draft" : phase === "revealing" ? "revealing…" : phase;
 
   return (
     <section className="panel arena-panel">
@@ -845,7 +1131,7 @@ function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, 
   placeholder: string;
 }) {
   const lineCount = Math.max(8, prompt.split("\n").length + 1);
-  const disabled = phase === "casting" || phase === "revealing" || phase === "won" || phase === "lost";
+  const disabled = phase === "casting" || phase === "rewarding" || phase === "revealing" || phase === "won" || phase === "lost";
 
   return (
     <section className="panel composer-panel">
@@ -917,7 +1203,7 @@ function ComposerPanel({ prompt, updatePrompt, onPaste, loadPreset, promptCost, 
 }
 
 // ---------- arbiter verdict ----------
-function VerdictPanel({ judge }: { judge: JudgeResult | null }) {
+function VerdictPanel({ judge, scoreEvent, relicState }: { judge: JudgeResult | null; scoreEvent: ScoreEvent | null; relicState: RelicView[] }) {
   const label = judge ? (judge.rejected ? "rejected" : judge.resisted ? "resisted" : judge.quality) : null;
   const tone = judge ? (judge.rejected || judge.resisted ? "enemy" : judge.quality) : "misfire";
   const sourceLabel = judge?.source === "ai" ? "llm" : judge?.source === "cache" ? "cache" : judge?.source === "fallback" ? "local" : "";
@@ -934,6 +1220,20 @@ function VerdictPanel({ judge }: { judge: JudgeResult | null }) {
               <span className={`verdict-quality ${tone}`}>{label}</span>
               <span className="verdict-score">{judge.score}/100</span>
               {judge.resisted && <span className="verdict-flag">base {judge.baseDamage} → {judge.damage}</span>}
+            </div>
+            {scoreEvent && (
+              <div className="score-event">
+                <span className="gain">+{scoreEvent.gain}</span>
+                <span className="combo">combo x{scoreEvent.combo}</span>
+                <span className="detail">{scoreEvent.detail}</span>
+              </div>
+            )}
+            <div className="relic-breakdown">
+              {relicState.map((relic) => (
+                <span key={relic.sigil} className={relic.on ? "on" : ""}>
+                  <b>{relic.sigil}</b>{relic.on ? "charged" : "missing"}
+                </span>
+              ))}
             </div>
             <p className="verdict-reason">{judge.reason}</p>
             <p className="verdict-improve"><span className="k">▸ to improve</span><span>{judge.improvement}</span></p>

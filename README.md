@@ -4,7 +4,7 @@
 
 **A retro terminal RPG where your prompt is the weapon.**
 
-You play a Prompt Mage dueling hostile prompt failures inside a dungeon parser. There are no attack buttons — you *write* spells. An LLM judge (the **Arbiter**) scores how good your prompt is, and that score becomes your damage.
+You play a Prompt Mage dueling hostile prompt failures inside a dungeon parser. There are no attack buttons — you *write* spells. An LLM judge (the **Arbiter**) scores how good your prompt is, that score becomes your damage, and the run grades you with score, rank, and combo.
 
 **Live demo:** [prompt-caster.vercel.app](https://prompt-caster.vercel.app)
 
@@ -16,7 +16,7 @@ You play a Prompt Mage dueling hostile prompt failures inside a dungeon parser. 
 
 ## What is it?
 
-PromptCaster turns prompt engineering into a combat system. Each turn you compose a prompt aimed at the enemy's weakness; the Arbiter grades your spellcraft in two layers: usable combat intent (role, target, action, effect) and reliability upgrades (specific tactic, constraints, sequence, confirmation, enemy adaptation). Better prompts hit harder — sloppy ones fizzle.
+PromptCaster turns prompt engineering into a combat system. Each turn you compose a prompt aimed at the enemy's weakness; the Arbiter grades your spellcraft in two layers: usable combat intent (role, target, action, effect) and reliability upgrades (specific tactic, constraints, sequence, confirmation, enemy adaptation). Better prompts hit harder, build combo, and push your run rank higher — sloppy ones fizzle and break momentum.
 
 The current judge is intentionally human-prompt friendly: a warrior, mage, commander, rogue, analyst, or prompt coach prompt can all score well if they clearly say who is acting, what they target, what they do, and what result they want. Regex/code syntax is optional flavor, not a requirement.
 
@@ -31,8 +31,10 @@ It's a focused two-boss gauntlet built as a serious **CLI/IDE-flavored** interfa
 1. **Write a spell** in the composer. Aim at the active enemy's weakness. Add constraints, context, sequence, or confirmation for a harder hit.
 2. **Watch the relics light up** as your prompt satisfies them (see below) — they're live feedback on prompt quality.
 3. **Cast** (button or `⌘/Ctrl + Enter`). The Arbiter scores your prompt; **damage scales with the score**.
-4. **Read the verdict.** The Arbiter tells you what landed and exactly what to improve next turn.
-5. **Survive the gauntlet.** After your cast, the enemy strikes back. Beat Regex Goblin to reveal Null Oracle; your HP and tokens restore to full before the second boss.
+4. **Chase score and combo.** Solid and critical casts build combo; resisted, weak, misfired, or borrowed casts slow you down.
+5. **Read the verdict.** The Arbiter tells you what landed, which relic checks triggered, and exactly what to improve next turn.
+6. **Draft a reward.** Beat Regex Goblin and choose one upgrade before Null Oracle.
+7. **Survive the gauntlet.** After your cast, the enemy strikes back. Your HP and tokens restore to full before the second boss.
 
 ### Enemies
 
@@ -48,6 +50,36 @@ It's a focused two-boss gauntlet built as a serious **CLI/IDE-flavored** interfa
 | `SYS` | System Prompt Crown | opens with **"You are…"** |
 | `CLR` | Clarity Gem | uses **clear / concrete / tactical / checkable** spellcraft language |
 | `CTX` | Context Blade | names the active enemy directly |
+
+### Run scoring, rank, and combo
+
+The top bar now tracks a persistent run score and combo meter. Every cast earns run score from the Arbiter score, effective damage, charged relics, quality tier, and active combo. Solid casts add `+1` combo, critical casts add `+2`, repeated resisted patterns cool the combo down, and misfires/borrowed casts break it.
+
+Boss clears add bonus score, and the final gauntlet clear adds survival bonus from remaining HP/tokens. The end screen shows your rank (`D` → `S`), total score, best combo, best hit, casts, critical count, clear bonus, medals, and penalties — so the replay goal is not only "win," but win cleanly.
+
+### Run medals
+
+Medals are one-time score bonuses for strong play patterns:
+
+| Medal | Unlock |
+|-------|--------|
+| Critical Thesis | land a clean critical cast |
+| Full Sigil | charge `SYS`, `CLR`, and `CTX` on one cast |
+| Chain Caster | reach combo `x3` |
+| Heavy Impact | deal at least `36` damage in one cast |
+| Clean Gauntlet | finish with no resisted or rejected casts |
+
+### Reward draft
+
+After Regex Goblin falls, the run pauses for a three-choice relic draft:
+
+| Reward | Effect |
+|--------|--------|
+| Token Siphon | solid or critical casts refund `6` tokens |
+| Combo Lens | all three relics charged adds `+1` combo and `+60` score |
+| Ward Script | enemy attacks deal `4` less damage |
+
+The draft makes the second boss feel different depending on how you want to play: economy, rank chase, or survival.
 
 ---
 
@@ -77,7 +109,7 @@ The Arbiter returns a sharp, in-character critique:
 - Code-only or regex-symbol-only prompts are capped low unless they include plain-language combat intent and an intended effect.
 - Solid/critical verdicts are guarded so the terminal text cannot claim the spell missed or failed after awarding strong damage.
 - Identical prompts are **cached**; if the provider is unavailable, a **local fallback judge** scores offline so the game always plays.
-- The displayed verdict (quality · score, the critique, and a `▸ TO IMPROVE` line) lives in its own panel:
+- The displayed verdict (quality · score, score gain/combo, relic trigger breakdown, critique, and a `▸ TO IMPROVE` line) lives in its own panel:
 
 ![Verdict · relics · log](docs/screenshots/verdict-log.png)
 
@@ -91,6 +123,7 @@ The whole point is *writing* good prompts, so several systems make shortcuts wor
 - **Borrowed words deal 0 damage.** Pasted text (or a template left verbatim) is flagged and lands for nothing until you rewrite it in your own words.
 - **The enemy adapts.** It remembers your last few casts within the current fight; reusing the same pattern is **resisted** (damage falls off), so you must keep your prompts varied. Pattern memory clears between bosses.
 - **Tokens are a resource.** Every cast costs tokens scaled to prompt length, with a small per-turn regen — rambling drains you, concision is rewarded.
+- **Combo rewards clean play.** Strong varied casts raise the meter; repeated, rejected, or unclear casts lower the final rank.
 
 <table>
 <tr>

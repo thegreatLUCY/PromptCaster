@@ -2,7 +2,8 @@
 
 A two-boss browser RPG where the player's **prompt is the weapon**. A Prompt Mage first
 duels the Regex Goblin, then the Null Oracle; an LLM "Arbiter" scores each prompt and
-**damage scales with the score**. This document is the current source of truth — it
+**damage scales with the score**. The run also has a persistent score/rank/combo layer so
+players can chase cleaner clears, not just survival. This document is the current source of truth — it
 supersedes the original pre-redesign handoff.
 
 Live demo: https://prompt-caster.vercel.app
@@ -74,12 +75,34 @@ BLANK_PATTERN   = /\[[^\]]+\]/
   one is shown as a dashed "NEXT … −N HP" telegraph in the enemy stat card.
 - **Turn order:** player casts → damage applies → if enemy alive, it retaliates, then tokens
   regen +8 and `turn++`. A kill skips the retaliation.
-- **Boss progression:** killing Regex Goblin sets `phase='revealing'`, logs the deeper signal,
-  switches to Null Oracle after a short delay, clears prompt/repetition memory, and restores
-  HP/tokens to `PLAYER_MAX_HP` / `PLAYER_MAX_TOKENS`. Killing Null Oracle sets `phase='won'`.
+- **Boss progression:** killing Regex Goblin sets `phase='rewarding'`; choosing a reward then
+  sets `phase='revealing'`, logs the deeper signal, switches to Null Oracle after a short delay,
+  clears prompt/repetition memory, and restores HP/tokens to `PLAYER_MAX_HP` / `PLAYER_MAX_TOKENS`.
+  Killing Null Oracle sets `phase='won'`.
 - **Test bypass:** `getRequestedEnemyIndex()` reads `?boss=2`, `?boss=null-oracle`,
   `?enemy=null-oracle`, or `?start=oracle` and initializes directly on Null Oracle with full
   HP/tokens plus a "TEST OVERRIDE" log. `reset()` preserves the requested starting boss.
+- **Run score/rank/combo:** `RunStats` tracks score, combo, best combo, casts, criticals,
+  solid casts, resisted/rejected penalties, best hit, bosses defeated, and clear bonus.
+  `rankForScore()` maps score to `D/C/B/A/S`; topbar pills show current score, rank chip,
+  and combo. `VerdictPanel` shows the latest `+score` and combo result after each cast.
+  It also shows a compact relic trigger breakdown (`SYS/CLR/CTX charged|missing`). The outcome
+  overlay summarizes rank, total score, best combo, best hit, casts, criticals, clear bonus,
+  and penalties.
+- **Run medals:** `MEDALS` defines one-time score bonuses for clean play: Critical Thesis
+  (clean critical), Full Sigil (all three relics), Chain Caster (combo x3), Heavy Impact
+  (36+ damage), and Clean Gauntlet (finish with no resisted/rejected casts). Unlocks log a
+  `MEDAL UNLOCKED` line, add their score bonus to the same cast's score event, and render in
+  the outcome overlay.
+- **Combo rules:** critical `+2`, solid `+1`, resisted `-1`, weak `-1`, misfire/rejected `0`.
+  Cast score comes from Arbiter score, effective damage, relic count, quality tier, and combo.
+  Boss clears add `bossClearBonus()`, and the final boss adds `finalClearBonus()` from remaining
+  HP/tokens and combo.
+- **Reward draft:** after Regex Goblin, `phase='rewarding'` opens `RewardDraft` before the
+  Null Oracle reveal. Rewards are defined in `REWARDS`: Token Siphon refunds 6 tokens on
+  clean solid/critical casts, Combo Lens adds +1 combo and +60 score when all three relics
+  are charged on a clean solid/critical, and Ward Script reduces incoming enemy attacks by 4.
+  Active rewards render as small sigils in the player stat card.
 
 ### Anti-abuse (the core of the design — keep all of it)
 
@@ -114,11 +137,11 @@ Shown both as live chips in the composer footer and as the bottom-row **Relics**
 ```
 t=0      phase='casting'; tokens-=cost; log 'player'
          (borrowed → fixed REJECTED judgment, no fetch; else cache→fetch→normalize→fallback)
-         compute resistance; setLastJudge; setBeam(now)
+         compute resistance; update run score/combo; setLastJudge; setBeam(now)
 t=720    enemyHp-=effectiveDamage; hit flash; floater (-dmg / RESISTED / REJECTED);
-         screen shake on critical; push 'result' (+ 'warning' if resisted/borrowed)
+         screen shake on critical; push 'result' and 'SCORE +N' (+ 'warning' if resisted/borrowed)
 t=1100   beam VFX unmounts
-t=1200   if enemy dead → phase='won'
+t=1200   if enemy dead → add clear/survival bonus; reward draft, reveal next boss, or phase='won'
 t=1280   else enemy attack: playerHp-=dmg; floater; log 'enemy'; turn++; regen; phase
 ```
 
@@ -220,9 +243,10 @@ gutter is decorative (does not scroll with content).
 motes, scanline, viewfinder brackets, scene HUD, figure tags w/ mini-HP, spinning **reticle**
 when armed, **windup** telegraph, staggered **cast-fx** orb→beam→impact→sparks, floaters),
 `ComposerPanel` (gutter, live relic chips, inline warning state, token cost, skeleton templates, cast-row),
-`VerdictPanel`, `RelicsPanel`, `MageSprite`, `GoblinSprite`, `NullOracleSprite` (SVG,
+`VerdictPanel` (including the latest run-score event), `RelicsPanel`, `MageSprite`, `GoblinSprite`, `NullOracleSprite` (SVG,
 `crispEdges`). `EnemySprite` chooses the active enemy sprite; Null Oracle has a separate
-pixel body plus flickering eye/omen animation.
+pixel body plus flickering eye/omen animation. `RewardDraft` is the modal three-choice upgrade
+screen between bosses.
 
 ---
 
@@ -252,6 +276,11 @@ Dependency-free guided walkthrough (`OnboardingTour` + `TOUR_STEPS` in `src/main
   the Vercel dashboard. If the top-bar judge pill falls back/offline on Vercel while local
   works, check those env vars and the serverless `api/` deployment first.
 - Keep all four anti-abuse systems (skeletons, borrowed=0, resistance, tokens).
+- Keep the score/rank/combo layer tied to prompt quality and varied play; do not let score
+  become a passive timer or pure damage mirror.
+- Keep medals one-time and skill-based; they should reward better prompt construction, not
+  passive progression.
+- Keep reward choices mechanically distinct: economy, score/combo, and survival.
 - Keep the serious CLI/IDE mood; 1px borders, square corners, the three accents.
 
 ---
